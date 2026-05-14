@@ -1,0 +1,476 @@
+{
+  "schema_version": "1.0",
+  "category": "common",
+  "comment": "25 普通圣器。effects 已应用数值平衡文档 §3.4 的调整。所有数值都是首版起手值，需原型测试调整。",
+
+  "artifacts": [
+    {
+      "id": "master_tower",
+      "name": "总管塔",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [1],
+      "description": "此塔的圣器槽数 +2（共 4 槽：1 主 + 3 副）；距其他基础塔 < 3 格时完全不工作",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "custom", "logic_id": "expand_slots", "params": { "extra_slots": 2 } }
+      ],
+      "downsides": [
+        { "type": "custom", "logic_id": "disable_if_too_close", "params": { "min_distance_to_other_tower": 3 } }
+      ],
+      "implementation_notes": "副槽不能装与主槽相同的圣器。距离判断: 与最近的另一座基础塔的格子距离 ≥3 才工作。"
+    },
+    {
+      "id": "power_borrow",
+      "name": "借力圣器",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [1],
+      "description": "此塔攻击伤害 += 周围 5 格内基础塔功率系数总和 × 60%；周围 5 格内基础塔攻速 -10%",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "custom", "logic_id": "borrow_power", "params": { "range_grids": 5, "ratio": 0.60 } }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "nearby_towers", "range_grids": 5, "stat": "attack_speed", "modifier": -0.10, "multiplicative": true }
+      ],
+      "implementation_notes": "每帧重算（或每次邻塔变化时）: damage_bonus = sum(neighbor.power_ratio) × 0.60 × tower.base_damage"
+    },
+    {
+      "id": "prism",
+      "name": "棱镜圣器",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [2],
+      "description": "此塔炮弹 → 持续激光（穿透所有敌人到射程末端）；射速降为基础的 1/3",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        { "type": "transform_bullet", "new_form": "laser", "laser_persistent": true }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "attack_speed", "modifier": -0.667, "multiplicative": true }
+      ],
+      "bullet_form_compatibility": ["laser"],
+      "implementation_notes": "激光按持续时间结算伤害（每帧 dmg = base_damage × deltaTime × attack_speed）。穿透到射程末端，不卡敌。"
+    },
+    {
+      "id": "high_explosive",
+      "name": "高爆圣器",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [2],
+      "description": "此塔炮弹 → 范围爆炸弹（爆炸半径 1.5 格）；射速 -40%，单发伤害 -20%",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        { "type": "transform_bullet", "new_form": "area", "area_radius": 1.5 }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "attack_speed", "modifier": -0.40, "multiplicative": true },
+        { "type": "stat_modifier", "target": "self_tower", "stat": "single_shot_damage", "modifier": -0.20, "multiplicative": true }
+      ],
+      "bullet_form_compatibility": ["area"],
+      "implementation_notes": "命中后 1.5 格半径内所有敌人受满伤害（不衰减）。"
+    },
+    {
+      "id": "fire_seed",
+      "name": "火种圣器",
+      "category": "common",
+      "rarity": "white",
+      "streams": [2, 10],
+      "description": "命中附加燃烧（DPS = 触发伤害 × 20% × 4 秒，总伤 80%）；单发伤害 -15%",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "on_hit_status", "status": "burn", "damage_percent_of_hit": 80, "duration_seconds": 4 }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "single_shot_damage", "modifier": -0.15, "multiplicative": true }
+      ],
+      "bullet_form_compatibility": ["bullet", "area"],
+      "implementation_notes": "已应用 §3.4 调整：DOT 总伤从 100% 改为 80%。激光不兼容（无命中事件）。"
+    },
+    {
+      "id": "ice_crystal",
+      "name": "冰晶圣器",
+      "category": "common",
+      "rarity": "white",
+      "streams": [2, 10],
+      "description": "命中附加 1 层减速（5 层冻结 1.5 秒）；单发伤害 -15%",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "on_hit_status", "status": "freeze", "stacks": 1, "max_stacks": 5, "duration_seconds": 2 }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "single_shot_damage", "modifier": -0.15, "multiplicative": true }
+      ],
+      "bullet_form_compatibility": ["bullet", "laser"],
+      "implementation_notes": "freeze status: 每层 -30% 移速；满 5 层完全冻结 1.5s 后清空层数。"
+    },
+    {
+      "id": "thunder",
+      "name": "雷鸣圣器",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [2, 10],
+      "description": "命中后跳跃到附近 2 个敌人，每跳衰减 35%；单发伤害 -10%",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        { "type": "custom", "logic_id": "chain_lightning", "params": { "jumps": 2, "decay_per_jump": 0.35, "max_distance_grids": 2 } }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "single_shot_damage", "modifier": -0.10, "multiplicative": true }
+      ],
+      "bullet_form_compatibility": ["bullet", "laser"],
+      "implementation_notes": "已应用 §3.4 调整: 3 跳 -30% → 2 跳 -35%。每跳找最近未跳过的敌人，伤害递减。"
+    },
+    {
+      "id": "splinter",
+      "name": "裂片圣器",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [2],
+      "description": "命中后炮弹分裂为 4 片小弹片（向周围扇形发射，每片 25% 单发伤害）；射程 -20%",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        { "type": "custom", "logic_id": "split_bullet", "params": { "fragments": 4, "fragment_damage_ratio": 0.25, "spread_angle_deg": 90, "fragment_range_grids": 2 } }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "range", "modifier": -0.20, "multiplicative": true }
+      ],
+      "bullet_form_compatibility": ["bullet"],
+      "implementation_notes": "命中后 4 个 fragments 向命中方向后方扇形飞出。"
+    },
+    {
+      "id": "corrosion",
+      "name": "腐蚀圣器",
+      "category": "common",
+      "rarity": "white",
+      "streams": [2, 10],
+      "description": "命中附加 1 层腐蚀（首层 -25% 护甲，每层 -5%，cap -60%，持续 8 秒）；单发伤害 -10%",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "on_hit_status", "status": "corrode", "stacks": 1, "max_stacks": 8, "duration_seconds": 8 }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "single_shot_damage", "modifier": -0.10, "multiplicative": true }
+      ],
+      "bullet_form_compatibility": ["bullet", "area"],
+      "implementation_notes": "已应用 §3.4 调整: 首层 -10% → -25%。corrode 公式: armor_reduction = 0.25 + 0.05 × (stacks - 1), cap 0.60。"
+    },
+    {
+      "id": "network",
+      "name": "网络圣器",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [3],
+      "description": "此塔自动与 3 格内最近的 3 座基础塔产生次级能源线（次级线伤害 = 主线 35%，不计入功率守恒）；此塔攻速 -40%",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "spawn_secondary_lines", "count": 3, "range_grids": 3, "damage_ratio": 0.35, "count_in_conservation": false }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "attack_speed", "modifier": -0.40, "multiplicative": true }
+      ],
+      "implementation_notes": "重要规则: 1) 网络塔之间不互连（避免双向叠加）。2) 次级线不再衍生次级线。3) 视觉上次级线必须区别于主线（更细、虚线、流光更暗）。"
+    },
+    {
+      "id": "ice_crystal_conduit",
+      "name": "冰晶导管",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [4],
+      "description": "通过此塔的所有能源线（含次级线），每秒给踩在线上的敌人 +1 冻结层数；线伤 -25%",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        { "type": "custom", "logic_id": "line_apply_freeze", "params": { "stacks_per_second": 1 } }
+      ],
+      "downsides": [
+        { "type": "energy_line_modifier", "target": "self_tower", "modifier_type": "line_damage", "value": -0.25 }
+      ],
+      "implementation_notes": "每秒 1 层（不是每条线每秒 1 层），避免多线叠加冻结堆积。冻结同一 freeze status 系统。"
+    },
+    {
+      "id": "range_compression",
+      "name": "远程压缩",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [4],
+      "description": "此塔距能源塔每多 1 格，能源线伤害 +12%（cap +120%）；距能源塔 ≤3 格时完全不工作",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        { "type": "custom", "logic_id": "distance_line_scaling", "params": { "per_grid_bonus": 0.12, "cap": 1.20 } }
+      ],
+      "downsides": [
+        { "type": "custom", "logic_id": "disable_if_too_close_to_energy_tower", "params": { "max_distance": 3 } }
+      ],
+      "implementation_notes": "每帧重算: line_damage_multiplier = min(1.20, max(0, (distance_to_energy_tower - 0)) × 0.12)。距离 ≤3 时塔不开火、能源线不产生伤害。"
+    },
+    {
+      "id": "overload_relay",
+      "name": "过载继电器",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [4, 5, 6],
+      "description": "释放任意主动技能时，所有能源线伤害 +150% 持续 5 秒；主动能量上限 -20",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        {
+          "type": "skill_synergy",
+          "trigger": "on_skill_cast",
+          "effect": { "type": "energy_line_modifier", "target": "all_lines", "modifier_type": "line_damage", "value": 1.50 },
+          "duration_seconds": 5
+        }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "energy_max", "modifier": -20, "multiplicative": false }
+      ],
+      "implementation_notes": "已应用 §3.4 调整: +80%/5s → +150%/5s。跨源胶水（技能→线）。"
+    },
+    {
+      "id": "devour_line",
+      "name": "吞噬线",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [4],
+      "description": "此塔不再发射炮弹，但能源线伤害 ×2.5",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "custom", "logic_id": "tower_disable_attack", "params": {} },
+        { "type": "energy_line_modifier", "target": "self_tower", "modifier_type": "line_damage", "value": 1.50 }
+      ],
+      "downsides": [],
+      "implementation_notes": "自带反噬（不开火）。线伤 ×2.5 实际是 +150% 加成，叠加在 base 之上。"
+    },
+    {
+      "id": "incantation",
+      "name": "咒文圣器",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [5],
+      "description": "所有主动技能直接伤害 +100%；技能消耗 +20%、冷却 +15%",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "skill_damage", "modifier": 1.00, "multiplicative": true }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "skill_cost", "modifier": 0.20, "multiplicative": true },
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "skill_cooldown", "modifier": 0.15, "multiplicative": true }
+      ],
+      "implementation_notes": "已应用 §3.4 调整: +60%/+25%/+20% → +100%/+20%/+15%。只影响 instant_damage 类型技能。"
+    },
+    {
+      "id": "resonance_trigger",
+      "name": "共振触发",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [6],
+      "description": "释放任意主动技能时，此塔下次攻击伤害 ×3 且为穿透弹道；攻速 -20%",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        {
+          "type": "skill_synergy",
+          "trigger": "on_skill_cast",
+          "effect": { "type": "custom", "logic_id": "next_shot_triple_pierce", "params": {} }
+        }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "attack_speed", "modifier": -0.20, "multiplicative": true }
+      ],
+      "implementation_notes": "标记此塔的下一发子弹: damage ×3 + 穿透到射程末端。子弹形式不变（炮弹/激光/范围）。"
+    },
+    {
+      "id": "overdrive_engine",
+      "name": "超频引擎",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [6],
+      "description": "能源塔超频技能持续时间 +5 秒；能源线过载效果 +30%；两个技能消耗各 +20",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "custom", "logic_id": "modify_skill", "params": { "skill_id": "energy_tower_overdrive", "duration_bonus": 5 } },
+        { "type": "custom", "logic_id": "modify_skill", "params": { "skill_id": "energy_line_overload", "effect_multiplier": 1.30 } }
+      ],
+      "downsides": [
+        { "type": "custom", "logic_id": "modify_skill", "params": { "skill_id": "energy_tower_overdrive", "cost_bonus": 20 } },
+        { "type": "custom", "logic_id": "modify_skill", "params": { "skill_id": "energy_line_overload", "cost_bonus": 20 } }
+      ],
+      "implementation_notes": "需要 SkillSystem 支持运行时修改 skill 参数。"
+    },
+    {
+      "id": "condenser",
+      "name": "凝聚塔",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [7],
+      "description": "此塔不再发射炮弹，转为持续生成主动能量（每秒 +1，受功率系数线性影响）",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        { "type": "custom", "logic_id": "tower_disable_attack", "params": {} },
+        { "type": "custom", "logic_id": "generate_active_energy", "params": { "energy_per_second": 1.0, "scale_with_power_ratio": true } }
+      ],
+      "downsides": [],
+      "implementation_notes": "已应用 §3.4 调整: 每秒 +2 → +1。energy_per_second × power_ratio = 实际产能。"
+    },
+    {
+      "id": "defense_garrison",
+      "name": "防御阵地塔",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [7],
+      "description": "此塔不再发射炮弹，周围 5 格内塔受到的伤害 -50%；释放任意主动技能时，此塔的护盾值刷新（基础值 100）",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "custom", "logic_id": "tower_disable_attack", "params": {} },
+        { "type": "custom", "logic_id": "damage_reduction_aura", "params": { "range_grids": 5, "reduction_ratio": 0.50 } },
+        {
+          "type": "skill_synergy",
+          "trigger": "on_skill_cast",
+          "effect": { "type": "custom", "logic_id": "refresh_self_shield", "params": { "shield_hp": 100 } }
+        }
+      ],
+      "downsides": [],
+      "implementation_notes": "护盾在受伤时优先抵消，释放技能时重置（不叠加）。Aura 在 5 格半径内所有友军基础塔生效（不包括能源塔）。"
+    },
+    {
+      "id": "energy_ammo",
+      "name": "注能弹药",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [8],
+      "description": "释放任意主动技能后，所有基础塔接下来 5 秒内攻击速度 +100%；主动能量上限 -15",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        {
+          "type": "skill_synergy",
+          "trigger": "on_skill_cast",
+          "effect": { "type": "stat_modifier", "target": "all_towers", "stat": "attack_speed", "modifier": 1.00, "multiplicative": true },
+          "duration_seconds": 5
+        }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "energy_max", "modifier": -15, "multiplicative": false }
+      ],
+      "implementation_notes": "跨源胶水（技能→塔）。Buff 持续 5s，期间多次释放技能不叠加。"
+    },
+    {
+      "id": "charged_hit",
+      "name": "蓄力击圣器",
+      "category": "common",
+      "rarity": "blue",
+      "streams": [8],
+      "description": "此塔每命中 3 次，产生 1 主动能量；攻击速度 -10%",
+      "shop_price": 400,
+      "drop_weight": 25,
+      "effects": [
+        {
+          "type": "skill_synergy",
+          "trigger": "on_n_hits",
+          "threshold": 3,
+          "effect": { "type": "custom", "logic_id": "grant_active_energy", "params": { "energy": 1 } }
+        }
+      ],
+      "downsides": [
+        { "type": "stat_modifier", "target": "self_tower", "stat": "attack_speed", "modifier": -0.10, "multiplicative": true }
+      ],
+      "implementation_notes": "已应用 §3.4 调整: 5 命中 → 3 命中。跨源胶水（塔→技能）。计数器是 per-tower。"
+    },
+    {
+      "id": "feedback_coil",
+      "name": "反馈线圈",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [4, 6],
+      "description": "能源线累计造成 500 伤害时，触发 1 次小型超频（场上所有塔功率 +30% 持续 5 秒）；能源线伤害 -15%",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        {
+          "type": "skill_synergy",
+          "trigger": "on_line_damage_threshold",
+          "threshold": 500,
+          "effect": { "type": "stat_modifier", "target": "all_towers", "stat": "power_ratio", "modifier": 0.30, "multiplicative": true },
+          "duration_seconds": 5
+        }
+      ],
+      "downsides": [
+        { "type": "energy_line_modifier", "target": "all_lines", "modifier_type": "line_damage", "value": -0.15 }
+      ],
+      "implementation_notes": "已应用 §3.4 调整: 1000/3s → 500/5s。跨源胶水（线→技能）。累计计数器是全局的，触发后清零。"
+    },
+    {
+      "id": "coin_magnet",
+      "name": "磁币圣器",
+      "category": "common",
+      "rarity": "white",
+      "streams": [9],
+      "description": "自动吸取 5 格内金币",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "custom", "logic_id": "auto_pickup_gold", "params": { "range_grids": 5 } }
+      ],
+      "downsides": [],
+      "implementation_notes": "便利功能。掉在地图上的金币 sprite 自动飞向此塔（再加 HUD 计数）。"
+    },
+    {
+      "id": "compound_interest",
+      "name": "复利圣器",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [9],
+      "description": "本局每过 30 秒，所有金币掉落量 ×1.05（无上限）；开局起 60 秒内，金币掉落 -50%",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "custom", "logic_id": "compound_gold_multiplier", "params": { "interval_seconds": 30, "multiplier_per_tick": 1.05 } }
+      ],
+      "downsides": [
+        { "type": "custom", "logic_id": "early_gold_penalty", "params": { "duration_seconds": 60, "penalty_ratio": -0.50 } }
+      ],
+      "implementation_notes": "全局倍率，所有金币来源（击杀、地形、波次奖励）都受影响。20 波局结束 (~25 分钟) 时倍率约 ×11。"
+    },
+    {
+      "id": "elemental_reaction",
+      "name": "元素反应",
+      "category": "common",
+      "rarity": "purple",
+      "streams": [10],
+      "description": "状态间触发反应：燃烧+冰冻=蒸发；冰冻+感电=麻痹；感电+燃烧=过载；腐蚀+任意=侵蚀。装备此圣器的塔不能附加任何状态。",
+      "shop_price": 1500,
+      "drop_weight": 12,
+      "effects": [
+        { "type": "custom", "logic_id": "enable_elemental_reactions", "params": {
+          "reactions": {
+            "burn+freeze": { "name": "vaporize", "type": "aoe_explosion", "radius": 1.5, "damage_formula": "remaining_burn_dot + remaining_freeze_potential" },
+            "freeze+shock": { "name": "paralyze", "type": "extend_duration", "extend_seconds": 2 },
+            "shock+burn": { "name": "overload", "type": "death_chain", "trigger_chance": 0.30, "explosion_radius": 1, "damage_formula": "0.5 × max_hp" },
+            "corrode+any": { "name": "erode", "type": "amplify_status", "amplify_ratio": 0.50 }
+          }
+        }}
+      ],
+      "downsides": [
+        { "type": "custom", "logic_id": "disable_status_application", "params": {} }
+      ],
+      "implementation_notes": "反应触发后，参与的状态层数被消耗（蒸发消耗燃烧+冰冻；麻痹延长冰冻+感电；过载在死亡时触发；侵蚀放大已有状态效果）。装备此圣器的塔的攻击不能附加状态（即使装了火种圣器在副槽也无效）。"
+    }
+  ]
+}

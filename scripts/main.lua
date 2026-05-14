@@ -5,30 +5,10 @@
 local UI = require("urhox-libs/UI")
 
 -- ============================================================================
--- 莫比斯画风渲染模块
+-- 色调配置
 -- ============================================================================
-local nvgCtx_ = nil
-local nvgFont_ = -1
-
--- 莫比斯配色（高饱和度 + 暖色调）
 local MOEBIUS = {
-    -- 轮廓线（极细 + 各物体固有色相近的深色描边）
-    OutlineWidth   = 1.0,                        -- 极细线宽
-    -- 各物体描边色：与固有色同色相，饱和度更高、明度更低
-    OutlineEnergy  = { 160, 95, 8, 220 },        -- 深金橙（能源塔）
-    OutlineTower   = { 45, 60, 115, 220 },       -- 深蓝（防御塔）
-    OutlineMonster = { 135, 18, 12, 220 },       -- 深红（怪物）
-    OutlineProj    = { 8, 95, 105, 200 },        -- 深青（炮弹）
-    OutlineLootG   = { 150, 105, 5, 210 },       -- 深金（金币掉落）
-    OutlineLootE   = { 25, 55, 125, 210 },       -- 深蓝（能量掉落）
-    -- 交叉影线
-    HatchColor     = { 20, 15, 10, 50 },         -- 半透明深色
-    HatchSpacing   = 6,                          -- 线间距（像素）
-    HatchAngle1    = 0.52,                       -- ~30度
-    HatchAngle2    = -0.52,                      -- ~-30度
     -- 色调（用于材质）
-    FloorDiff      = Color(0.82, 0.72, 0.55, 1), -- 沙漠暖黄
-    FloorEmit      = Color(0.35, 0.30, 0.20),
     EnergyDiff     = Color(0.95, 0.68, 0.15, 1), -- 明亮金橙
     EnergyEmit     = Color(0.50, 0.35, 0.08),
     TowerDiff      = Color(0.45, 0.55, 0.72, 1), -- 天际蓝灰
@@ -39,16 +19,12 @@ local MOEBIUS = {
     ProjectileEmit = Color(0.10, 0.45, 0.50),
     GridColor      = Color(0.50, 0.42, 0.32, 0.30),-- 暖色网格
     RangeColor     = Color(0.40, 0.60, 0.80, 0.35),
-    SkyTopColor    = { 140, 180, 210, 255 },     -- 天空渐变顶部
-    SkyBotColor    = { 210, 195, 165, 255 },     -- 天空渐变底部
     LootGoldDiff   = Color(1.0, 0.82, 0.20, 1),
     LootGoldEmit   = Color(0.45, 0.35, 0.05),
     LootEnergyDiff = Color(0.30, 0.55, 0.90, 1),
     LootEnergyEmit = Color(0.15, 0.25, 0.50),
     LinesDiff      = Color(0.35, 0.70, 0.85, 0.85),
     LinesEmit      = Color(0.25, 0.45, 0.65),
-    -- 画面边框色（极淡）
-    FrameColor     = { 120, 100, 75, 60 },
 }
 
 -- ============================================================================
@@ -85,7 +61,7 @@ local CONFIG = {
     EnergyTowerHP = 500,
     EnergyTowerHPBarW = 1.4,
     EnergyTowerHPBarH = 0.12,
-    EnergyTowerHPBarOffY = 2.8,  -- 圆锥顶上方
+    EnergyTowerHPBarOffY = 1.8,  -- tower-round 总高 ~1.53m，血条在上方
     MonsterDmgToTower = 20,      -- 每只怪物到达中心造成的伤害
     -- 怪物
     MonsterHP = 80,
@@ -109,7 +85,7 @@ local CONFIG = {
     -- 血条
     HPBarW = 0.5,
     HPBarH = 0.06,
-    HPBarOffY = 0.6,            -- 血条在怪物上方偏移
+    HPBarOffY = 0.4,            -- 血条在怪物上方偏移 (UFO高约0.26m缩放后)
 }
 
 -- ============================================================================
@@ -136,6 +112,15 @@ local hoverOnMap_ = false
 -- 能源线
 ---@type Node
 local linesNode_ = nil
+local lineMat_ = nil            -- 能源线材质（用于脉冲动画）
+local linePulseTime_ = 0        -- 脉冲计时器
+
+-- 电流脉冲系统
+local pulsesNode_ = nil         -- 脉冲球的父节点
+local pulses_ = {}              -- { nodes={}, fromX, fromZ, toX, toZ, t, speed }
+local PULSES_PER_LINE = 3       -- 每条线上的脉冲数量
+local TAIL_COUNT = 4            -- 每个脉冲的拖尾节数（不含头部，共 1+4=5 个节点）
+local TAIL_SPACING = 0.045      -- 拖尾节之间的 t 间隔
 
 -- 经济
 local gold_ = CONFIG.InitialGold
@@ -184,22 +169,29 @@ function Start()
     PlaceEnergyTower()
     CreateHoverIndicator()
     CreateGameUI()
-    InitMoebiusRenderer()
     SubscribeToEvent("Update", "HandleUpdate")
-    print("=== Energy Tower Defense Started (Moebius Style) ===")
+    print("=== Energy Tower Defense Started ===")
 end
 
 function Stop()
-    if nvgCtx_ then
-        nvgDelete(nvgCtx_)
-        nvgCtx_ = nil
-    end
     UI.Shutdown()
 end
 
 -- ============================================================================
 -- 场景
 -- ============================================================================
+
+--- 递归遍历节点树，将所有 Light 组件的亮度乘以 factor
+function DimAllLights(node, factor)
+    local light = node:GetComponent("Light")
+    if light then
+        local b = light.brightness
+        light.brightness = b * factor
+    end
+    for i = 0, node:GetNumChildren(false) - 1 do
+        DimAllLights(node:GetChild(i), factor)
+    end
+end
 
 function CreateScene()
     scene_ = Scene()
@@ -211,19 +203,56 @@ function CreateScene()
     local lg = scene_:CreateChild("LightGroup")
     lg:LoadXML(lgFile:GetRoot())
 
-    -- 地面
+    -- 整体光照降低到 0.4 倍（营造暗色氛围，突出发光效果）
+    DimAllLights(lg, 0.4)
+
+    -- 地面：用 tile 模型铺设可见区域
+    CreateTileFloor()
+end
+
+--- 铺设地板
+function CreateTileFloor()
+    -- 纯色平整地板
     local floor = scene_:CreateChild("Floor")
     floor.position = Vector3(0, -0.05, 0)
     floor.scale = Vector3(CONFIG.MapHalfW * 2 + 4, 0.1, CONFIG.MapHalfH * 2 + 4)
-    local model = floor:CreateComponent("StaticModel")
-    model:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
-    local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    mat:SetShaderParameter("MatDiffColor", Variant(MOEBIUS.FloorDiff))
-    mat:SetShaderParameter("MatEmissiveColor", Variant(MOEBIUS.FloorEmit))
-    mat:SetShaderParameter("Metallic", Variant(0.0))
-    mat:SetShaderParameter("Roughness", Variant(1.0))
-    model:SetMaterial(mat)
+    local floorModel = floor:CreateComponent("StaticModel")
+    floorModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
+    local floorMat = Material:new()
+    floorMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+    floorMat:SetShaderParameter("MatDiffColor", Variant(Color(0.45, 0.72, 0.56, 1)))  -- 草绿
+    floorMat:SetShaderParameter("Roughness", Variant(1.0))
+    floorMat:SetShaderParameter("Metallic", Variant(0.0))
+    floorModel:SetMaterial(floorMat)
+    floorModel.castShadows = false
+
+    -- 装饰物（树、岩石、水晶）散布在能源范围外围
+    local DECO_RANGE = CONFIG.EnergyRange + 12
+    local DECO_MODELS = {
+        { mdl = "Meshes/TD/tile-rock.mdl",    mat = "Materials/TD/tile-rock_00_colormap.xml" },
+        { mdl = "Meshes/TD/tile-tree.mdl",    mat = "Materials/TD/tile-tree_00_colormap.xml" },
+        { mdl = "Meshes/TD/tile-crystal.mdl", mat = "Materials/TD/tile-crystal_00_colormap.xml" },
+        { mdl = "Meshes/TD/tile-dirt.mdl",    mat = "Materials/TD/tile-dirt_00_colormap.xml" },
+    }
+
+    math.randomseed(42)  -- 固定种子保证每次生成一致
+    local decoParent = scene_:CreateChild("FloorDeco")
+    for x = -DECO_RANGE, DECO_RANGE do
+        for z = -DECO_RANGE, DECO_RANGE do
+            local dist = math.sqrt(x * x + z * z)
+            -- 在能源范围外随机放装饰
+            if dist > CONFIG.EnergyRange + 1 and math.random() < 0.08 then
+                local deco = DECO_MODELS[math.random(1, #DECO_MODELS)]
+                local child = decoParent:CreateChild("Deco")
+                child.position = Vector3(x, 0, z)
+                child.rotation = Quaternion(math.random(0, 3) * 90, Vector3.UP)
+                local m = child:CreateComponent("StaticModel")
+                m:SetModel(cache:GetResource("Model", deco.mdl))
+                m:SetMaterial(cache:GetResource("Material", deco.mat))
+                m.castShadows = true
+            end
+        end
+    end
 end
 
 -- ============================================================================
@@ -317,32 +346,100 @@ end
 
 function PlaceEnergyTower()
     local node = scene_:CreateChild("EnergyTower")
-    -- Cone 高度 1.0，底面中心在原点，需要 y=0.5 放在地面上；再放大一些
     node.position = Vector3(0, 0, 0)
-    node.scale = Vector3(1.4, 2.0, 1.4)
-    local model = node:CreateComponent("StaticModel")
-    model:SetModel(cache:GetResource("Model", "Models/Cone.mdl"))
+    -- 整体缩放 1.6 倍，让能源塔更大更醒目
+    local sc = 1.6
+    node.scale = Vector3(sc, sc, sc)
 
-    local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    mat:SetShaderParameter("MatDiffColor", Variant(MOEBIUS.EnergyDiff))
-    mat:SetShaderParameter("MatEmissiveColor", Variant(MOEBIUS.EnergyEmit))
-    mat:SetShaderParameter("Metallic", Variant(0.0))
-    mat:SetShaderParameter("Roughness", Variant(1.0))
-    model:SetMaterial(mat)
-    model.castShadows = true
+    -- 底座: tower-round-base (1×0.21×1m)
+    local baseChild = node:CreateChild("ETBase")
+    local baseModel = baseChild:CreateComponent("StaticModel")
+    baseModel:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-base.mdl"))
+    baseModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-base_00_colormap.xml"))
+    baseModel.castShadows = true
 
-    -- Cone 模型底面在 y=-0.5, 顶在 y=0.5，缩放 2.0 后范围 y=-1..1
-    -- 要让底面贴地(y=0)，需要 node.y = 1.0 (scale.y * 0.5)
-    node.position = Vector3(0, 1.0, 0)
+    -- 塔身第1层: tower-round-top-a (0.92×0.5×0.92m)
+    local bodyChild1 = node:CreateChild("ETBody1")
+    bodyChild1.position = Vector3(0, 0.21, 0)
+    local bodyModel1 = bodyChild1:CreateComponent("StaticModel")
+    bodyModel1:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-top-a.mdl"))
+    bodyModel1:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-top-a_00_colormap.xml"))
+    bodyModel1.castShadows = true
+
+    -- 塔身第2层: 再叠一层 tower-round-top-a
+    local bodyChild2 = node:CreateChild("ETBody2")
+    bodyChild2.position = Vector3(0, 0.71, 0)  -- 0.21 + 0.50
+    local bodyModel2 = bodyChild2:CreateComponent("StaticModel")
+    bodyModel2:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-top-a.mdl"))
+    bodyModel2:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-top-a_00_colormap.xml"))
+    bodyModel2.castShadows = true
+
+    -- 水晶: tower-round-crystals (1×0.82×1m)
+    local crystalChild = node:CreateChild("ETCrystals")
+    crystalChild.position = Vector3(0, 1.21, 0)  -- 0.21 + 0.50 + 0.50
+    local crystalModel = crystalChild:CreateComponent("StaticModel")
+    crystalModel:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-crystals.mdl"))
+    crystalModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-crystals_00_colormap.xml"))
+    crystalModel.castShadows = true
+    -- 模型原始总高度: 0.21 + 0.50 + 0.50 + 0.82 = 2.03 米
+    -- 缩放后: 2.03 × 1.6 ≈ 3.25 米
+
+    -- 发光粒子环绕效果（底部环形发射，独立节点不受塔缩放影响）
+    local particleNode = scene_:CreateChild("ETParticles")
+    particleNode.position = Vector3(0, 0.25, 0)  -- 底部高度
+
+    local emitter = particleNode:CreateComponent("ParticleEmitter")
+    local effect = ParticleEffect()
+
+    -- 扁平环形发射区域：宽环、极薄高度
+    effect:SetEmitterType(EMITTER_SPHERE)
+    effect:SetEmitterSize(Vector3(2.6, 0.15, 2.6))
+    effect:SetNumParticles(80)
+
+    effect:SetMinEmissionRate(35)
+    effect:SetMaxEmissionRate(55)
+    -- 消散更快
+    effect:SetMinTimeToLive(0.4)
+    effect:SetMaxTimeToLive(0.9)
+    -- 粒子更小
+    effect:SetMinParticleSize(Vector2(0.015, 0.015))
+    effect:SetMaxParticleSize(Vector2(0.04, 0.04))
+
+    -- 向上快速飘散
+    effect:SetMinDirection(Vector3(-0.2, 1.0, -0.2))
+    effect:SetMaxDirection(Vector3(0.2, 1.5, 0.2))
+    effect:SetMinVelocity(0.8)
+    effect:SetMaxVelocity(1.5)
+    effect:SetDampingForce(1.5)
+
+    effect:SetMinRotationSpeed(90)
+    effect:SetMaxRotationSpeed(240)
+
+    -- 快速闪亮后迅速消散
+    effect:AddColorTime(Color(1.0, 0.9, 0.4, 0.0), 0.0)
+    effect:AddColorTime(Color(1.0, 0.8, 0.25, 1.0), 0.1)
+    effect:AddColorTime(Color(1.0, 0.65, 0.15, 0.5), 0.4)
+    effect:AddColorTime(Color(0.8, 0.4, 0.05, 0.0), 1.0)
+
+    -- 强发光材质
+    local pMat = Material:new()
+    pMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+    pMat:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.85, 0.35, 1.0)))
+    pMat:SetShaderParameter("MatEmissiveColor", Variant(Color(2.0, 1.5, 0.4)))
+    pMat:SetShaderParameter("Metallic", Variant(0.0))
+    pMat:SetShaderParameter("Roughness", Variant(1.0))
+    effect:SetMaterial(pMat)
+
+    emitter:SetEffect(effect)
+    emitter:SetEmitting(true)
 
     -- 初始化能源塔血量
     etHP_ = CONFIG.EnergyTowerHP
     etMaxHP_ = CONFIG.EnergyTowerHP
 
-    -- 创建能源塔血条（独立节点，不受圆锥缩放影响）
+    -- 创建能源塔血条（独立节点，不受塔缩放影响）
     etHPBg_ = scene_:CreateChild("EnergyTowerHPBar")
-    etHPBg_.position = Vector3(0, CONFIG.EnergyTowerHPBarOffY, 0)
+    etHPBg_.position = Vector3(0, 3.6, 0)  -- 缩放后塔顶约3.25m，血条在上方
 
     local bg = etHPBg_:CreateChild("ETHPBg")
     bg.scale = Vector3(CONFIG.EnergyTowerHPBarW, CONFIG.EnergyTowerHPBarH, 0.01)
@@ -372,9 +469,10 @@ end
 function CreateHoverIndicator()
     hoverNode_ = scene_:CreateChild("Hover")
     hoverNode_.position = Vector3(0, CONFIG.HoverY, 0)
-    hoverNode_.scale = Vector3(0.92, 0.02, 0.92)
+    -- selection-a 原始 1×0.05×1m, 缩放到 0.92 适配网格
+    hoverNode_.scale = Vector3(0.92, 1.0, 0.92)
     local model = hoverNode_:CreateComponent("StaticModel")
-    model:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
+    model:SetModel(cache:GetResource("Model", "Meshes/TD/selection-a.mdl"))
 
     local mat = Material:new()
     mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
@@ -513,52 +611,33 @@ function GetTowerCost()
 end
 
 -- ============================================================================
--- 三棱锥几何体
+-- 防御塔武器模型列表（随机选择）
 -- ============================================================================
+local WEAPON_MODELS = {
+    "weapon-cannon",
+    "weapon-ballista",
+    "weapon-catapult",
+    "weapon-turret",
+}
 
----@type Material
-local towerMat_ = nil
+--- 在 node 上创建防御塔模型（底座 + 武器）
+function CreateTowerModel(node)
+    -- 底座: tower-square-bottom-a (1×0.5×1m, 底面 y=0)
+    local baseChild = node:CreateChild("TowerBase")
+    local baseModel = baseChild:CreateComponent("StaticModel")
+    baseModel:SetModel(cache:GetResource("Model", "Meshes/TD/tower-square-bottom-a.mdl"))
+    baseModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-square-bottom-a_00_colormap.xml"))
+    baseModel.castShadows = true
 
-function GetTowerMaterial()
-    if towerMat_ then return towerMat_ end
-    towerMat_ = Material:new()
-    towerMat_:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    towerMat_:SetShaderParameter("MatDiffColor", Variant(MOEBIUS.TowerDiff))
-    towerMat_:SetShaderParameter("MatEmissiveColor", Variant(MOEBIUS.TowerEmit))
-    towerMat_:SetShaderParameter("Metallic", Variant(0.0))
-    towerMat_:SetShaderParameter("Roughness", Variant(1.0))
-    towerMat_.cullMode = CULL_NONE
-    return towerMat_
-end
-
---- 在 node 上创建三棱锥 CustomGeometry（底面 y=0, 顶点 y=1, 底面半径 ~0.5）
-function CreateTetrahedron(node)
-    local geom = node:CreateComponent("CustomGeometry")
-    geom:BeginGeometry(0, TRIANGLE_LIST)
-
-    local h = 1.0
-    local r = 0.45
-    local apex = Vector3(0, h, 0)
-    local v1 = Vector3(0, 0, r)                    -- 前
-    local v2 = Vector3(-r * 0.866, 0, -r * 0.5)    -- 左后
-    local v3 = Vector3(r * 0.866, 0, -r * 0.5)     -- 右后
-
-    local function addTri(a, b, c)
-        local n = (b - a):CrossProduct(c - a):Normalized()
-        geom:DefineVertex(a); geom:DefineNormal(n); geom:DefineTexCoord(Vector2(0, 0))
-        geom:DefineVertex(b); geom:DefineNormal(n); geom:DefineTexCoord(Vector2(1, 0))
-        geom:DefineVertex(c); geom:DefineNormal(n); geom:DefineTexCoord(Vector2(0.5, 1))
-    end
-
-    addTri(apex, v1, v3)   -- 右前面
-    addTri(apex, v3, v2)   -- 后面
-    addTri(apex, v2, v1)   -- 左前面
-    addTri(v1, v2, v3)     -- 底面
-
-    geom:Commit()
-    geom:SetMaterial(GetTowerMaterial())
-    geom.castShadows = true
-    return geom
+    -- 武器: 随机选择一种，叠在底座上方 (底座高 0.5m)
+    local weaponName = WEAPON_MODELS[math.random(1, #WEAPON_MODELS)]
+    local weaponChild = node:CreateChild("TowerWeapon")
+    weaponChild.position = Vector3(0, 0.5, 0)  -- 底座高度
+    local weaponModel = weaponChild:CreateComponent("StaticModel")
+    weaponModel:SetModel(cache:GetResource("Model", "Meshes/TD/" .. weaponName .. ".mdl"))
+    weaponModel:SetMaterial(cache:GetResource("Material", "Materials/TD/" .. weaponName .. "_00_colormap.xml"))
+    weaponModel.castShadows = true
+    -- 总高度: 0.5 + ~0.53 ≈ 1.03 米
 end
 
 -- ============================================================================
@@ -572,9 +651,8 @@ function PlaceBasicTower(gx, gz)
     gold_ = gold_ - cost
 
     local node = scene_:CreateChild("Tower_" .. gx .. "_" .. gz)
-    node.scale = Vector3(0.7, 0.9, 0.7)
     node.position = Vector3(gx, 0, gz)
-    CreateTetrahedron(node)
+    CreateTowerModel(node)
 
     local dist = math.sqrt(gx * gx + gz * gz)
     local tower = {
@@ -586,6 +664,8 @@ function PlaceBasicTower(gx, gz)
         linePwr = 0,
         ratio = 0,
         cooldown = 0,
+        weaponYaw = 0,      -- 当前武器朝向角度
+        targetYaw = nil,     -- 目标朝向角度（nil=无目标）
     }
     table.insert(towers_, tower)
 
@@ -684,6 +764,9 @@ end
 -- 怪物刷新
 -- ============================================================================
 
+-- 怪物UFO模型列表（随机选择）
+local UFO_MODELS = { "enemy-ufo-a", "enemy-ufo-b", "enemy-ufo-c", "enemy-ufo-d" }
+
 function SpawnMonster()
     local node = scene_:CreateChild("Monster")
 
@@ -692,14 +775,17 @@ function SpawnMonster()
     local sd = CONFIG.SpawnDistance
     local sx = math.cos(angle) * sd
     local sz = math.sin(angle) * sd
-    local s = CONFIG.MonsterSize
+    local s = CONFIG.MonsterSize  -- 缩放比例
 
-    node.position = Vector3(sx, s * 0.5, sz)
+    -- UFO 模型原始宽 1m，缩放到 MonsterSize 大小
+    node.position = Vector3(sx, 0, sz)  -- 模型底面 y=0，直接贴地
     node.scale = Vector3(s, s, s)
 
+    -- 随机选择一种UFO模型
+    local ufoName = UFO_MODELS[math.random(1, #UFO_MODELS)]
     local model = node:CreateComponent("StaticModel")
-    model:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
-    model:SetMaterial(GetMonsterMaterial())
+    model:SetModel(cache:GetResource("Model", "Meshes/TD/" .. ufoName .. ".mdl"))
+    model:SetMaterial(cache:GetResource("Material", "Materials/TD/" .. ufoName .. "_00_colormap.xml"))
     model.castShadows = true
 
     -- 朝向能源塔中心的方向
@@ -823,7 +909,7 @@ end
 function DamageEnergyTower(dmg)
     if gameOver_ then return end
     etHP_ = etHP_ - dmg
-    SpawnDmgText(Vector3(0, 2.0, 0), dmg)
+    SpawnDmgText(Vector3(0, 3.0, 0), dmg)
     if etHP_ <= 0 then
         etHP_ = 0
         GameOver()
@@ -923,32 +1009,67 @@ end
 -- 塔攻击系统
 -- ============================================================================
 
-function UpdateTowerAttacks(dt)
-    for _, tower in ipairs(towers_) do
-        tower.cooldown = tower.cooldown - dt
-        if tower.cooldown <= 0 then
-            -- 寻找射程内最近的怪物
-            local bestM = nil
-            local bestDist = CONFIG.TowerRange + 1
+--- 将角度归一化到 -180 ~ 180 范围
+local function NormalizeAngle(a)
+    a = a % 360
+    if a > 180 then a = a - 360 end
+    return a
+end
 
-            for _, m in ipairs(monsters_) do
-                if m.node and m.hp > 0 then
-                    local dx = m.node.position.x - tower.gx
-                    local dz = m.node.position.z - tower.gz
-                    local d = math.sqrt(dx * dx + dz * dz)
-                    if d <= CONFIG.TowerRange and d < bestDist then
-                        bestDist = d
-                        bestM = m
+function UpdateTowerAttacks(dt)
+    local ROTATE_SPEED = 720  -- 度/秒，旋转很快但平滑
+
+    for _, tower in ipairs(towers_) do
+        -- 平滑旋转武器朝向
+        if tower.targetYaw then
+            local weaponNode = tower.node:GetChild("TowerWeapon", false)
+            if weaponNode then
+                local diff = NormalizeAngle(tower.targetYaw - tower.weaponYaw)
+                local maxStep = ROTATE_SPEED * dt
+                if math.abs(diff) <= maxStep then
+                    tower.weaponYaw = tower.targetYaw
+                else
+                    if diff > 0 then
+                        tower.weaponYaw = tower.weaponYaw + maxStep
+                    else
+                        tower.weaponYaw = tower.weaponYaw - maxStep
                     end
                 end
+                weaponNode.rotation = Quaternion(tower.weaponYaw, Vector3.UP)
             end
+        end
 
-            if bestM then
-                local att = CalcAttenuation(tower.dist)
-                local dmg = CONFIG.TowerBaseDmg * att
-                FireProjectile(tower, bestM, dmg)
-                tower.cooldown = CONFIG.TowerFireInterval
+        -- 每帧寻找射程内最近的怪物（用于跟踪朝向）
+        local bestM = nil
+        local bestDist = CONFIG.TowerRange + 1
+
+        for _, m in ipairs(monsters_) do
+            if m.node and m.hp > 0 then
+                local dx = m.node.position.x - tower.gx
+                local dz = m.node.position.z - tower.gz
+                local d = math.sqrt(dx * dx + dz * dz)
+                if d <= CONFIG.TowerRange and d < bestDist then
+                    bestDist = d
+                    bestM = m
+                end
             end
+        end
+
+        -- 持续跟踪最近敌人方向（无论是否在冷却中）
+        if bestM then
+            local tpos = bestM.node.position
+            local dx = tpos.x - tower.gx
+            local dz = tpos.z - tower.gz
+            tower.targetYaw = math.deg(math.atan(dx, dz)) + 180
+        end
+
+        -- 冷却完毕才开火
+        tower.cooldown = tower.cooldown - dt
+        if tower.cooldown <= 0 and bestM then
+            local att = CalcAttenuation(tower.dist)
+            local dmg = CONFIG.TowerBaseDmg * att
+            FireProjectile(tower, bestM, dmg)
+            tower.cooldown = CONFIG.TowerFireInterval
         end
     end
 end
@@ -959,14 +1080,15 @@ end
 
 function FireProjectile(tower, targetMonster, dmg)
     local node = scene_:CreateChild("Projectile")
-    local s = CONFIG.ProjectileSize
+    -- weapon-ammo-cannonball 原始直径 0.28m, 按需缩放
+    local s = CONFIG.ProjectileSize / 0.28  -- 相对于原始尺寸的缩放
     node.scale = Vector3(s, s, s)
-    -- 从塔顶发射（三棱锥高度约 0.9）
-    node.position = Vector3(tower.gx, 0.9, tower.gz)
+    -- 从塔顶发射（tower-square-bottom 0.5 + weapon ~0.53 ≈ 1.03）
+    node.position = Vector3(tower.gx, 1.0, tower.gz)
 
     local model = node:CreateComponent("StaticModel")
-    model:SetModel(cache:GetResource("Model", "Models/Sphere.mdl"))
-    model:SetMaterial(GetProjectileMaterial())
+    model:SetModel(cache:GetResource("Model", "Meshes/TD/weapon-ammo-cannonball.mdl"))
+    model:SetMaterial(cache:GetResource("Material", "Materials/TD/weapon-ammo-cannonball_00_colormap.xml"))
 
     local proj = {
         node = node,
@@ -1042,12 +1164,13 @@ end
 
 function SpawnLoot(pos, lootType)
     local node = scene_:CreateChild("Loot_" .. lootType)
-    local s = 0.25
+    -- detail-crystal 原始尺寸约 0.25×0.43×0.29m，适当缩放
+    local s = 0.6
     node.scale = Vector3(s, s, s)
     node.position = Vector3(pos.x, CONFIG.LootFloatHeight, pos.z)
 
     local model = node:CreateComponent("StaticModel")
-    model:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
+    model:SetModel(cache:GetResource("Model", "Meshes/TD/detail-crystal.mdl"))
     if lootType == "gold" then
         model:SetMaterial(GetLootGoldMaterial())
     else
@@ -1157,39 +1280,155 @@ end
 -- ============================================================================
 
 function RebuildEnergyLines()
-    -- 清除旧线
+    -- 清除旧线和脉冲
     if linesNode_ then
         linesNode_:Remove()
         linesNode_ = nil
     end
+    if pulsesNode_ then
+        pulsesNode_:Remove()
+        pulsesNode_ = nil
+    end
+    pulses_ = {}
+    lineMat_ = nil
 
     if #towers_ == 0 then return end
 
+    -- === 1. 用拉伸 Box 模型实现粗发光线段 ===
+    local LINE_Y = 0.15          -- 抬高到地面上方，确保可见
+    local LINE_THICK = 0.10      -- 线条粗细（Y 方向）
+    local LINE_WIDTH = 0.14      -- 线条宽度（垂直于线方向的XZ平面宽度）
+
     linesNode_ = scene_:CreateChild("EnergyLines")
-    linesNode_.position = Vector3(0, CONFIG.EnergyLineY, 0)
 
-    local geom = linesNode_:CreateComponent("CustomGeometry")
-    geom:BeginGeometry(0, LINE_LIST)
-
-    local p1 = Vector3(0, 0, 0) -- 能源塔位置（地面）
+    -- 共享发光材质
+    lineMat_ = Material:new()
+    lineMat_:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+    lineMat_:SetShaderParameter("MatDiffColor", Variant(Color(0.25, 0.55, 0.85, 1.0)))
+    lineMat_:SetShaderParameter("MatEmissiveColor", Variant(Color(0.5, 1.0, 1.5)))
+    lineMat_:SetShaderParameter("Metallic", Variant(0.0))
+    lineMat_:SetShaderParameter("Roughness", Variant(1.0))
 
     for _, t in ipairs(towers_) do
-        local p2 = Vector3(t.gx, 0, t.gz)
-        geom:DefineVertex(p1)
-        geom:DefineVertex(p2)
+        local dx = t.gx
+        local dz = t.gz
+        local len = math.sqrt(dx * dx + dz * dz)
+        if len > 0.01 then
+            local lineNode = linesNode_:CreateChild("Line")
+            -- 中点位置
+            lineNode.position = Vector3(dx * 0.5, LINE_Y, dz * 0.5)
+            -- 旋转：让 Box 的 Z 轴对齐线段方向
+            local angle = math.deg(math.atan(dx, dz))
+            lineNode.rotation = Quaternion(angle, Vector3.UP)
+            -- 缩放：Box 默认 1x1x1, Z=线长, X=宽, Y=厚
+            lineNode.scale = Vector3(LINE_WIDTH, LINE_THICK, len)
+
+            local model = lineNode:CreateComponent("StaticModel")
+            model:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
+            model:SetMaterial(lineMat_)
+            model.castShadows = false
+        end
     end
 
-    geom:Commit()
+    -- === 2. 创建电流脉冲（头部+拖尾段） ===
+    pulsesNode_ = scene_:CreateChild("EnergyPulses")
 
-    local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-    mat:SetShaderParameter("MatDiffColor", Variant(MOEBIUS.LinesDiff))
-    mat:SetShaderParameter("MatEmissiveColor", Variant(MOEBIUS.LinesEmit))
-    mat:SetShaderParameter("Metallic", Variant(0.0))
-    mat:SetShaderParameter("Roughness", Variant(1.0))
-    geom:SetMaterial(mat)
+    -- 为头部和每级拖尾创建独立材质（emissive 递减）
+    local TOTAL_SEGMENTS = 1 + TAIL_COUNT  -- 头部 + 拖尾
+    local segMats = {}
+    for si = 1, TOTAL_SEGMENTS do
+        local mat = Material:new()
+        mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+        -- 从头到尾：亮度 1.0 → 0.0 指数衰减
+        local falloff = 1.0 - ((si - 1) / TOTAL_SEGMENTS)
+        falloff = falloff * falloff  -- 平方衰减，尾部更暗
+        local eR = 1.8 * falloff
+        local eG = 3.0 * falloff
+        local eB = 4.0 * falloff
+        local dR = 0.4 + 0.5 * falloff
+        local dG = 0.7 + 0.3 * falloff
+        local dB = 0.9 + 0.1 * falloff
+        mat:SetShaderParameter("MatDiffColor", Variant(Color(dR, dG, dB, 1.0)))
+        mat:SetShaderParameter("MatEmissiveColor", Variant(Color(eR, eG, eB)))
+        mat:SetShaderParameter("Metallic", Variant(0.0))
+        mat:SetShaderParameter("Roughness", Variant(1.0))
+        segMats[si] = mat
+    end
 
-    print(string.format("[EnergyLines] Rebuilt %d lines (LINE_LIST)", #towers_))
+    local sphereMdl = cache:GetResource("Model", "Models/Sphere.mdl")
+
+    for _, t in ipairs(towers_) do
+        local dist = math.sqrt(t.gx * t.gx + t.gz * t.gz)
+        local speed = 1.0 / math.max(0.3, dist / 5.0)
+
+        for k = 1, PULSES_PER_LINE do
+            local initT = (k - 1) / PULSES_PER_LINE
+            local nodes = {}
+
+            for si = 1, TOTAL_SEGMENTS do
+                local n = pulsesNode_:CreateChild("Seg")
+                -- 头部最大，拖尾逐渐变小
+                local sizeFalloff = 1.0 - ((si - 1) / TOTAL_SEGMENTS) * 0.65
+                local baseSize = 0.16 * sizeFalloff
+                n.scale = Vector3(baseSize, baseSize, baseSize)
+                local m = n:CreateComponent("StaticModel")
+                m:SetModel(sphereMdl)
+                m:SetMaterial(segMats[si])
+                m.castShadows = false
+                nodes[si] = { node = n, baseSize = baseSize }
+            end
+
+            local pulse = {
+                nodes = nodes,
+                fromX = 0, fromZ = 0,
+                toX = t.gx, toZ = t.gz,
+                t = initT,
+                speed = speed,
+            }
+            table.insert(pulses_, pulse)
+        end
+    end
+
+    print(string.format("[EnergyLines] Rebuilt %d lines + %d pulses (%d segments each)",
+        #towers_, #pulses_, TOTAL_SEGMENTS))
+end
+
+--- 能源线脉冲动画 + 电流流动更新（在 HandleUpdate 中调用）
+function UpdateEnergyLinePulse(dt)
+    -- 线条呼吸动画
+    if lineMat_ then
+        linePulseTime_ = linePulseTime_ + dt
+        local pulse = 0.5 + 0.5 * math.sin(linePulseTime_ * 3.0)
+        local intensity = 0.6 + pulse * 1.0
+        lineMat_:SetShaderParameter("MatEmissiveColor",
+            Variant(Color(0.5 * intensity, 1.0 * intensity, 1.5 * intensity)))
+    end
+
+    -- 电流脉冲段沿线流动（头部+拖尾）
+    local LINE_Y = 0.15
+    for _, p in ipairs(pulses_) do
+        p.t = p.t + p.speed * dt
+        if p.t >= 1.0 then
+            p.t = p.t - 1.0
+        end
+
+        for si, seg in ipairs(p.nodes) do
+            if seg.node then
+                -- 头部 si=1 在 p.t, 拖尾 si=2,3... 在 p.t 后方
+                local segT = p.t - (si - 1) * TAIL_SPACING
+                -- 环绕处理
+                if segT < 0 then segT = segT + 1.0 end
+
+                local px = p.fromX + (p.toX - p.fromX) * segT
+                local pz = p.fromZ + (p.toZ - p.fromZ) * segT
+                seg.node.position = Vector3(px, LINE_Y, pz)
+
+                -- 缩放保持 baseSize 不变
+                local s = seg.baseSize
+                seg.node.scale = Vector3(s, s, s)
+            end
+        end
+    end
 end
 
 -- ============================================================================
@@ -1203,6 +1442,7 @@ function HandleUpdate(eventType, eventData)
     HandleCameraPan()
     HandleCameraZoom()
     UpdateEnergyTowerHP()
+    UpdateEnergyLinePulse(dt)
     UpdateDmgTexts(dt)
 
     if gameOver_ then return end
@@ -1349,326 +1589,4 @@ function HandlePlacement()
     end
 end
 
--- ============================================================================
--- 莫比斯画风渲染模块
--- ============================================================================
 
-function InitMoebiusRenderer()
-    nvgCtx_ = nvgCreate(1)
-    if not nvgCtx_ then
-        print("[Moebius] ERROR: Failed to create NanoVG context")
-        return
-    end
-    nvgFont_ = nvgCreateFont(nvgCtx_, "sans", "Fonts/MiSans-Regular.ttf")
-    SubscribeToEvent(nvgCtx_, "NanoVGRender", "HandleMoebiusRender")
-    print("[Moebius] Renderer initialized")
-end
-
--- -------------------------------------------------------
--- 工具：世界坐标 → 屏幕像素
--- -------------------------------------------------------
----@param worldPos Vector3
----@return number, number
-function WorldToScreen(worldPos)
-    local ndc = camera_:WorldToScreenPoint(worldPos)
-    return ndc.x * graphics:GetWidth(), ndc.y * graphics:GetHeight()
-end
-
--- -------------------------------------------------------
--- 2D 凸包 (Gift Wrapping / Jarvis March)
--- 输入: {{x,y}, ...}  输出: 凸包顶点（顺序排列）
--- -------------------------------------------------------
-function ConvexHull2D(pts)
-    local n = #pts
-    if n < 3 then return pts end
-    -- 找最左点
-    local s = 1
-    for i = 2, n do
-        if pts[i][1] < pts[s][1] or
-           (pts[i][1] == pts[s][1] and pts[i][2] < pts[s][2]) then
-            s = i
-        end
-    end
-    local hull = {}
-    local cur = s
-    repeat
-        hull[#hull + 1] = pts[cur]
-        local nxt = nil
-        for i = 1, n do
-            if i ~= cur then
-                if nxt == nil then
-                    nxt = i
-                else
-                    local cross = (pts[nxt][1] - pts[cur][1]) * (pts[i][2] - pts[cur][2])
-                                - (pts[nxt][2] - pts[cur][2]) * (pts[i][1] - pts[cur][1])
-                    if cross > 0 then
-                        nxt = i
-                    elseif cross == 0 then
-                        -- 共线取更远的
-                        local d1 = (pts[nxt][1] - pts[cur][1])^2 + (pts[nxt][2] - pts[cur][2])^2
-                        local d2 = (pts[i][1] - pts[cur][1])^2 + (pts[i][2] - pts[cur][2])^2
-                        if d2 > d1 then nxt = i end
-                    end
-                end
-            end
-        end
-        cur = nxt
-    until cur == s or #hull > n
-    return hull
-end
-
--- -------------------------------------------------------
--- 将凸包向外膨胀 amount 像素
--- -------------------------------------------------------
-function ExpandHull(hull, amount)
-    local n = #hull
-    if n < 3 or amount <= 0 then return hull end
-    local cx, cy = 0, 0
-    for _, p in ipairs(hull) do cx = cx + p[1]; cy = cy + p[2] end
-    cx, cy = cx / n, cy / n
-    local result = {}
-    for _, p in ipairs(hull) do
-        local dx, dy = p[1] - cx, p[2] - cy
-        local d = math.sqrt(dx * dx + dy * dy)
-        if d > 0.001 then
-            local s = (d + amount) / d
-            result[#result + 1] = { cx + dx * s, cy + dy * s }
-        else
-            result[#result + 1] = { p[1], p[2] }
-        end
-    end
-    return result
-end
-
--- -------------------------------------------------------
--- 从世界空间 3D 点集 → 投影 → 凸包 → 绘制轮廓多边形
--- -------------------------------------------------------
-function DrawOutlineFromVerts(ctx, worldPts, lw, expand)
-    local screen = {}
-    for _, wp in ipairs(worldPts) do
-        local sx, sy = WorldToScreen(wp)
-        screen[#screen + 1] = { sx, sy }
-    end
-    local hull = ConvexHull2D(screen)
-    if #hull < 3 then return end
-    hull = ExpandHull(hull, expand or (lw * 0.6))
-
-    nvgBeginPath(ctx)
-    nvgMoveTo(ctx, hull[1][1], hull[1][2])
-    for i = 2, #hull do
-        nvgLineTo(ctx, hull[i][1], hull[i][2])
-    end
-    nvgClosePath(ctx)
-    nvgStrokeWidth(ctx, lw)
-    nvgStroke(ctx)
-end
-
--- -------------------------------------------------------
--- 获取圆锥（能源塔）的世界顶点：底面环 + 顶点
--- node pos=(0,1,0) scale=(1.4,2.0,1.4)
--- 模型底面 y=-0.5 → 世界 y=0, 顶 y=0.5 → 世界 y=2.0
--- 底面半径 0.5*1.4 = 0.7
--- -------------------------------------------------------
-function GetConeWorldVerts()
-    local verts = {}
-    local rimR = 0.7
-    local segments = 16
-    -- 顶点
-    verts[#verts + 1] = Vector3(0, 2.0, 0)
-    -- 底面环
-    for i = 0, segments - 1 do
-        local a = (i / segments) * math.pi * 2
-        verts[#verts + 1] = Vector3(math.cos(a) * rimR, 0, math.sin(a) * rimR)
-    end
-    return verts
-end
-
--- -------------------------------------------------------
--- 获取三棱锥（防御塔）的世界顶点
--- 本地空间: apex=(0,1,0), v1=(0,0,0.45), v2=(-0.389,0,-0.225), v3=(0.389,0,-0.225)
--- node.scale=(0.7,0.9,0.7) node.pos=(gx,0,gz)
--- -------------------------------------------------------
-function GetTetraWorldVerts(gx, gz)
-    local sx, sy, sz = 0.7, 0.9, 0.7
-    local r = 0.45
-    return {
-        Vector3(gx,                    sy,                gz),                  -- apex
-        Vector3(gx,                    0,                 gz + r * sz),         -- 前
-        Vector3(gx - r * 0.866 * sx,   0,                 gz - r * 0.5 * sz),  -- 左后
-        Vector3(gx + r * 0.866 * sx,   0,                 gz - r * 0.5 * sz),  -- 右后
-    }
-end
-
--- -------------------------------------------------------
--- 获取立方体（怪物）的8个世界顶点
--- Box 模型 -0.5~0.5, scale=(s,s,s)
--- -------------------------------------------------------
-function GetBoxWorldVerts(pos, halfExt)
-    local hx, hy, hz = halfExt, halfExt, halfExt
-    return {
-        Vector3(pos.x - hx, pos.y - hy, pos.z - hz),
-        Vector3(pos.x + hx, pos.y - hy, pos.z - hz),
-        Vector3(pos.x - hx, pos.y + hy, pos.z - hz),
-        Vector3(pos.x + hx, pos.y + hy, pos.z - hz),
-        Vector3(pos.x - hx, pos.y - hy, pos.z + hz),
-        Vector3(pos.x + hx, pos.y - hy, pos.z + hz),
-        Vector3(pos.x - hx, pos.y + hy, pos.z + hz),
-        Vector3(pos.x + hx, pos.y + hy, pos.z + hz),
-    }
-end
-
--- -------------------------------------------------------
--- 获取球体（炮弹）的轮廓采样点
--- -------------------------------------------------------
-function GetSphereWorldVerts(center, radius)
-    local verts = {}
-    local n = 12
-    for i = 0, n - 1 do
-        local a = (i / n) * math.pi * 2
-        -- 赤道环
-        verts[#verts + 1] = Vector3(center.x + math.cos(a) * radius, center.y, center.z + math.sin(a) * radius)
-        -- 经线环（XY平面）
-        verts[#verts + 1] = Vector3(center.x + math.cos(a) * radius, center.y + math.sin(a) * radius, center.z)
-        -- 经线环（YZ平面）
-        verts[#verts + 1] = Vector3(center.x, center.y + math.sin(a) * radius, center.z + math.cos(a) * radius)
-    end
-    -- 极点
-    verts[#verts + 1] = Vector3(center.x, center.y + radius, center.z)
-    verts[#verts + 1] = Vector3(center.x, center.y - radius, center.z)
-    return verts
-end
-
--- -------------------------------------------------------
--- 交叉影线
--- -------------------------------------------------------
-function DrawHatchRegion(ctx, x, y, w, h, spacing, angle)
-    nvgSave(ctx)
-    nvgScissor(ctx, x, y, w, h)
-
-    local cosA = math.cos(angle)
-    local sinA = math.sin(angle)
-    local diag = math.sqrt(w * w + h * h)
-    local centerX = x + w * 0.5
-    local centerY = y + h * 0.5
-
-    local numLines = math.ceil(diag / spacing)
-    for i = -numLines, numLines do
-        local offset = i * spacing
-        local mx = centerX + (-sinA) * offset
-        local my = centerY + cosA * offset
-        local x1 = mx - cosA * diag
-        local y1 = my - sinA * diag
-        local x2 = mx + cosA * diag
-        local y2 = my + sinA * diag
-        nvgBeginPath(ctx)
-        nvgMoveTo(ctx, x1, y1)
-        nvgLineTo(ctx, x2, y2)
-        nvgStroke(ctx)
-    end
-
-    nvgResetScissor(ctx)
-    nvgRestore(ctx)
-end
-
--- -------------------------------------------------------
--- 主渲染
--- -------------------------------------------------------
-function HandleMoebiusRender(eventType, eventData)
-    if not nvgCtx_ or not camera_ then return end
-
-    local ctx = nvgCtx_
-    local w = graphics:GetWidth()
-    local h = graphics:GetHeight()
-    local dpr = graphics:GetDPR()
-
-    nvgBeginFrame(ctx, w, h, 1.0)
-
-    local lw = MOEBIUS.OutlineWidth * dpr
-
-    -- ================================================================
-    -- 1) 天空渐变叠加
-    -- ================================================================
-    nvgBeginPath(ctx)
-    nvgRect(ctx, 0, 0, w, h * 0.35)
-    local skyGrad = nvgLinearGradient(ctx, 0, 0, 0, h * 0.35,
-        nvgRGBA(MOEBIUS.SkyTopColor[1], MOEBIUS.SkyTopColor[2], MOEBIUS.SkyTopColor[3], 35),
-        nvgRGBA(MOEBIUS.SkyBotColor[1], MOEBIUS.SkyBotColor[2], MOEBIUS.SkyBotColor[3], 0))
-    nvgFillPaint(ctx, skyGrad)
-    nvgFill(ctx)
-
-    -- ================================================================
-    -- 2) 物体轮廓线（凸包贴合几何体，各物体固有色深色描边）
-    -- ================================================================
-    local expand = lw * 0.4  -- 极细线微量膨胀即可
-
-    -- 2a) 能源塔（圆锥）— 深金橙
-    local oe = MOEBIUS.OutlineEnergy
-    nvgStrokeColor(ctx, nvgRGBA(oe[1], oe[2], oe[3], oe[4]))
-    DrawOutlineFromVerts(ctx, GetConeWorldVerts(), lw, expand)
-
-    -- 2b) 防御塔（三棱锥）— 深蓝
-    local ot = MOEBIUS.OutlineTower
-    nvgStrokeColor(ctx, nvgRGBA(ot[1], ot[2], ot[3], ot[4]))
-    for _, t in ipairs(towers_) do
-        if t.node then
-            DrawOutlineFromVerts(ctx, GetTetraWorldVerts(t.gx, t.gz), lw, expand)
-        end
-    end
-
-    -- 2c) 怪物（立方体）— 深红
-    local om = MOEBIUS.OutlineMonster
-    nvgStrokeColor(ctx, nvgRGBA(om[1], om[2], om[3], om[4]))
-    local mHalf = CONFIG.MonsterSize * 0.5
-    for _, m in ipairs(monsters_) do
-        if m.node and m.hp > 0 then
-            DrawOutlineFromVerts(ctx, GetBoxWorldVerts(m.node.position, mHalf), lw, expand)
-        end
-    end
-
-    -- 2d) 炮弹（球体）— 深青
-    local op = MOEBIUS.OutlineProj
-    nvgStrokeColor(ctx, nvgRGBA(op[1], op[2], op[3], op[4]))
-    for _, p in ipairs(projectiles_) do
-        if p.node then
-            DrawOutlineFromVerts(ctx, GetSphereWorldVerts(p.node.position, CONFIG.ProjectileSize * 0.5), lw, expand)
-        end
-    end
-
-    -- 2e) 掉落物 — 各自固有色深色
-    for _, l in ipairs(loots_) do
-        if l.node then
-            local ol = l.type == "gold" and MOEBIUS.OutlineLootG or MOEBIUS.OutlineLootE
-            nvgStrokeColor(ctx, nvgRGBA(ol[1], ol[2], ol[3], ol[4]))
-            DrawOutlineFromVerts(ctx, GetBoxWorldVerts(l.node.position, 0.125), lw, expand)
-        end
-    end
-
-    -- ================================================================
-    -- 3) 交叉影线
-    -- ================================================================
-    local hc = MOEBIUS.HatchColor
-    local spacing = MOEBIUS.HatchSpacing * dpr
-
-    -- 底部影线带
-    nvgStrokeColor(ctx, nvgRGBA(hc[1], hc[2], hc[3], hc[4]))
-    nvgStrokeWidth(ctx, 0.8 * dpr)
-    DrawHatchRegion(ctx, 0, h * 0.75, w, h * 0.25, spacing, MOEBIUS.HatchAngle1)
-
-    -- 左右边缘淡影线
-    nvgStrokeColor(ctx, nvgRGBA(hc[1], hc[2], hc[3], math.floor(hc[4] * 0.5)))
-    nvgStrokeWidth(ctx, 0.6 * dpr)
-    DrawHatchRegion(ctx, 0, 0, w * 0.1, h, spacing * 1.2, MOEBIUS.HatchAngle2)
-    DrawHatchRegion(ctx, w * 0.9, 0, w * 0.1, h, spacing * 1.2, MOEBIUS.HatchAngle2)
-
-    -- ================================================================
-    -- 4) 画面边框
-    -- ================================================================
-    nvgBeginPath(ctx)
-    nvgRect(ctx, 2, 2, w - 4, h - 4)
-    local fc = MOEBIUS.FrameColor
-    nvgStrokeColor(ctx, nvgRGBA(fc[1], fc[2], fc[3], fc[4]))
-    nvgStrokeWidth(ctx, 1.5 * dpr)
-    nvgStroke(ctx)
-
-    nvgEndFrame(ctx)
-end

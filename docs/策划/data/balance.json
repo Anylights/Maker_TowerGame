@@ -1,0 +1,186 @@
+{
+  "schema_version": "1.0",
+  "comment": "全局平衡常量。改数值优先改这里，不要改代码。",
+
+  "energy_tower": {
+    "comment": "能源塔 Lv.1-10 数值表",
+    "level_curve": [
+      { "level": 1, "total_power": 100, "hp": 100, "radius": 7, "energy_max": 100, "transmission_eff_pct": 100 },
+      { "level": 2, "total_power": 110, "hp": 115, "radius": 7, "energy_max": 110, "transmission_eff_pct": 105 },
+      { "level": 3, "total_power": 120, "hp": 130, "radius": 7, "energy_max": 120, "transmission_eff_pct": 110 },
+      { "level": 4, "total_power": 130, "hp": 145, "radius": 8, "energy_max": 130, "transmission_eff_pct": 115 },
+      { "level": 5, "total_power": 145, "hp": 165, "radius": 8, "energy_max": 145, "transmission_eff_pct": 120, "unlock_core_artifact_slot": true },
+      { "level": 6, "total_power": 160, "hp": 185, "radius": 8, "energy_max": 160, "transmission_eff_pct": 125 },
+      { "level": 7, "total_power": 175, "hp": 205, "radius": 9, "energy_max": 175, "transmission_eff_pct": 130 },
+      { "level": 8, "total_power": 185, "hp": 220, "radius": 9, "energy_max": 185, "transmission_eff_pct": 135 },
+      { "level": 9, "total_power": 195, "hp": 235, "radius": 9, "energy_max": 195, "transmission_eff_pct": 140 },
+      { "level": 10, "total_power": 200, "hp": 250, "radius": 9, "energy_max": 200, "transmission_eff_pct": 145, "core_artifact_awakening": true }
+    ],
+    "upgrade_costs": [
+      { "from": 1, "to": 2, "gold": 80, "material": 20 },
+      { "from": 2, "to": 3, "gold": 140, "material": 45 },
+      { "from": 3, "to": 4, "gold": 220, "material": 80 },
+      { "from": 4, "to": 5, "gold": 320, "material": 130 },
+      { "from": 5, "to": 6, "gold": 450, "material": 200 },
+      { "from": 6, "to": 7, "gold": 600, "material": 280 },
+      { "from": 7, "to": 8, "gold": 780, "material": 380 },
+      { "from": 8, "to": 9, "gold": 1000, "material": 500 },
+      { "from": 9, "to": 10, "gold": 1300, "material": 650 }
+    ]
+  },
+
+  "basic_tower": {
+    "base_damage": 10,
+    "base_attack_speed": 1.0,
+    "base_range": 4,
+    "base_hp": 50,
+    "min_attack_speed_ratio": 0.30,
+    "build_cost_formula": "30 + 8 * built_count + 2 * built_count * built_count",
+    "demolish_refund_in_combat": 0.40,
+    "demolish_refund_between_waves": 0.70
+  },
+
+  "energy_formula": {
+    "comment": "P_delivered = P_share × clamp(1 - attenuation_factor × (d/R)^attenuation_exponent, min, max)",
+    "attenuation_factor": 0.65,
+    "attenuation_exponent": 1.35,
+    "min_attenuation": 0.25,
+    "max_attenuation": 1.00
+  },
+
+  "energy_line": {
+    "comment": "line_dps = P_line × base_damage_efficiency × transmission_eff_pct/100 × 圣器修正",
+    "base_damage_efficiency": 0.35,
+    "multi_line_decay": [1.00, 0.75, 0.55, 0.40, 0.30, 0.20]
+  },
+
+  "wave_scaling": {
+    "comment": "Wave_n_HP = base_hp × hp_growth_per_wave^(n-1)",
+    "hp_growth_per_wave": 1.13,
+    "boss_hp_multiplier": 12,
+    "elite_hp_default_multiplier": 2.5
+  },
+
+  "drop_weights": {
+    "comment": "每次掉落 3 候选，按权重独立抽样。玩家从 3 候选中选 1 + 可 Skip。",
+    "white": 60,
+    "blue": 25,
+    "purple": 12,
+    "gold": 3,
+    "candidates_per_drop": 3,
+    "skip_reward_gold": 50
+  },
+
+  "shop_prices": {
+    "comment": "局外购买价格（星币）。等级解锁权限见 §10.1 of 数值平衡文档。",
+    "white": 100,
+    "blue": 400,
+    "purple": 1500,
+    "gold": 5000
+  },
+
+  "out_of_run_energy_tower": {
+    "comment": "局外能源塔 Lv.1-5。决定局内开局等级、商店购买权限、牌库容量。",
+    "level_curve": [
+      { "level": 1, "in_run_start_level": 1, "shop_unlock_rarities": ["white"], "deck_capacity": 6 },
+      { "level": 2, "in_run_start_level": 2, "shop_unlock_rarities": ["white", "blue"], "deck_capacity": 7, "extras": { "starting_gold": 20 } },
+      { "level": 3, "in_run_start_level": 3, "shop_unlock_rarities": ["white", "blue", "purple"], "deck_capacity": 8, "extras": { "starting_material": 20 } },
+      { "level": 4, "in_run_start_level": 4, "shop_unlock_rarities": ["white", "blue", "purple"], "deck_capacity": 9, "extras": { "starting_active_energy": 30 } },
+      { "level": 5, "in_run_start_level": 5, "shop_unlock_rarities": ["white", "blue", "purple"], "deck_capacity": 10, "extras": { "challenge_difficulty_unlocked": true } }
+    ],
+    "upgrade_costs_starcoins": [
+      { "from": 1, "to": 2, "starcoins": 500 },
+      { "from": 2, "to": 3, "starcoins": 2000 },
+      { "from": 3, "to": 4, "starcoins": 6000 },
+      { "from": 4, "to": 5, "starcoins": 15000 }
+    ],
+    "comment_gold_artifacts": "金圣器不通过等级解锁，靠成就系统解锁（见 achievements.json，待实现）"
+  },
+
+  "fusion": {
+    "comment": "圣器融合。失败 = 50% 素材返还（碎片）+ 1 件降级品",
+    "success_rates": {
+      "same_name_low_quality": 0.90,
+      "same_category_diff_name": 0.70,
+      "cross_category": 0.55,
+      "cross_epic_plus": 0.40,
+      "legendary_targeted": 0.25
+    },
+    "failure_refund_ratio": 0.50,
+    "stabilizer_material_bonus": 0.15
+  },
+
+  "refining": {
+    "comment": "圣器精炼，必成功。每 +3 解锁一个小质变",
+    "max_level": 10,
+    "cost_per_level": [
+      { "level": 1, "gold": 50, "fragments": 1 },
+      { "level": 2, "gold": 100, "fragments": 2 },
+      { "level": 3, "gold": 200, "fragments": 3, "qualitative_unlock": "minor_1" },
+      { "level": 4, "gold": 350, "fragments": 5 },
+      { "level": 5, "gold": 500, "fragments": 8 },
+      { "level": 6, "gold": 700, "fragments": 12, "qualitative_unlock": "minor_2" },
+      { "level": 7, "gold": 950, "fragments": 17 },
+      { "level": 8, "gold": 1250, "fragments": 23 },
+      { "level": 9, "gold": 1600, "fragments": 30, "qualitative_unlock": "minor_3" },
+      { "level": 10, "gold": 2000, "fragments": 40, "qualitative_unlock": "ultimate" }
+    ]
+  },
+
+  "status_effects": {
+    "burn": {
+      "comment": "DPS = 触发伤害 × dps_ratio_of_hit, 持续 default_duration 秒",
+      "dps_ratio_of_hit": 0.20,
+      "default_duration": 4,
+      "stack_rule": "max"
+    },
+    "freeze": {
+      "comment": "1 层 -slow_per_stack 移速；满 max_stacks 完全冻结 freeze_duration 秒，然后清空层数",
+      "slow_per_stack": 0.30,
+      "max_stacks": 5,
+      "freeze_duration": 1.5,
+      "stack_decay_per_second": 0.5
+    },
+    "shock": {
+      "comment": "雷电连锁",
+      "default_jumps": 2,
+      "default_decay_per_jump": 0.35,
+      "max_distance_grids": 2
+    },
+    "corrode": {
+      "comment": "护甲减少。armor_reduction = first_layer + per_layer × (stacks - 1), cap",
+      "first_layer": 0.25,
+      "per_layer": 0.05,
+      "cap": 0.60,
+      "duration": 8,
+      "stack_rule": "add"
+    }
+  },
+
+  "scene_objects": {
+    "comment": "地图地形物件。可被塔攻击。",
+    "stone": { "hp": 50, "drops": { "gold": 30, "material": 1 } },
+    "ore": { "hp": 100, "drops": { "material": 5, "active_energy": 10 }, "adjacent_buff": { "type": "collection_artifact_effect", "modifier": 0.20 } },
+    "ancient_ruin": { "hp": 200, "drops": { "artifact_embryo": 1, "material": 10 }, "adjacent_buff": { "type": "artifact_trigger_rate", "modifier": 0.15 } },
+    "energy_crystal": { "hp": 80, "drops": { "active_energy": 50 }, "adjacent_buff": { "type": "power_ratio", "modifier": 0.10 } },
+    "sealed_mountain": { "hp": 500, "drops": { "rare_artifact": 1 }, "post_break": "open_build_grid" }
+  },
+
+  "starcoin_rewards": {
+    "comment": "通关奖励星币（按表现）",
+    "base": 200,
+    "per_remaining_hp_percent": 5,
+    "per_wave_completed_below_target_time": 10,
+    "boss_kill_bonus": 100,
+    "max_per_run": 800
+  },
+
+  "global_constants": {
+    "grid_size_pixels": 64,
+    "map_grids_x": 20,
+    "map_grids_y": 15,
+    "wave_prep_time_seconds": 10,
+    "max_active_energy_per_run": 200,
+    "single_run_target_minutes": 25
+  }
+}

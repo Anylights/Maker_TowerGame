@@ -1,0 +1,200 @@
+{
+  "schema_version": "1.0",
+  "comment": "20 波刷怪配置。每波包含 spawn_groups（按时间顺序刷出）。HP 自动按 wave_scaling.hp_growth_per_wave 缩放。",
+
+  "map": "fractured_mine",
+  "map_paths": [
+    { "id": "path_north", "waypoints": [[20, 3], [10, 3], [10, 7]] },
+    { "id": "path_south", "waypoints": [[20, 12], [10, 12], [10, 7]] }
+  ],
+  "energy_tower_position": [10, 7],
+
+  "waves": [
+    {
+      "wave": 1,
+      "name": "教学：第一只怪",
+      "prep_time_seconds": 30,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 5, "interval_seconds": 2.0, "path": "path_north", "delay_seconds": 0 }
+      ]
+    },
+    {
+      "wave": 2,
+      "name": "教学：能源线价值",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 10, "interval_seconds": 1.5, "path": "path_north", "delay_seconds": 0 }
+      ]
+    },
+    {
+      "wave": 3,
+      "name": "群虫袭来",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "swarm", "count": 25, "interval_seconds": 0.6, "path": "path_north", "delay_seconds": 0 }
+      ]
+    },
+    {
+      "wave": 4,
+      "name": "疾行者突袭",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 8, "interval_seconds": 1.5, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "sprinter", "count": 5, "interval_seconds": 1.0, "path": "path_south", "delay_seconds": 5 }
+      ]
+    },
+    {
+      "wave": 5,
+      "name": "首个精英",
+      "prep_time_seconds": 20,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 12, "interval_seconds": 1.2, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "walker", "count": 1, "interval_seconds": 0, "path": "path_south", "delay_seconds": 8, "elite_affixes": ["thick_armor"] }
+      ]
+    },
+    {
+      "wave": 6,
+      "name": "双路压力",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 15, "interval_seconds": 1.0, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "swarm", "count": 20, "interval_seconds": 0.8, "path": "path_south", "delay_seconds": 3 }
+      ]
+    },
+    {
+      "wave": 7,
+      "name": "甲壳兽登场",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "shellbeast", "count": 6, "interval_seconds": 2.5, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "walker", "count": 12, "interval_seconds": 1.5, "path": "path_south", "delay_seconds": 5 }
+      ]
+    },
+    {
+      "wave": 8,
+      "name": "护盾混合",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "shielded", "count": 8, "interval_seconds": 2.0, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "swarm", "count": 30, "interval_seconds": 0.5, "path": "path_south", "delay_seconds": 8 }
+      ]
+    },
+    {
+      "wave": 9,
+      "name": "迅捷精英",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 20, "interval_seconds": 1.0, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "sprinter", "count": 3, "interval_seconds": 1.5, "path": "path_south", "delay_seconds": 5, "elite_affixes": ["swift"] }
+      ]
+    },
+    {
+      "wave": 10,
+      "name": "Boss: 裂山巨像",
+      "prep_time_seconds": 25,
+      "spawn_groups": [
+        { "enemy_id": "shatter_titan", "count": 1, "interval_seconds": 0, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "swarm", "count": 30, "interval_seconds": 0.5, "path": "path_south", "delay_seconds": 10 }
+      ]
+    },
+    {
+      "wave": 11,
+      "name": "吞能者初现",
+      "prep_time_seconds": 20,
+      "spawn_groups": [
+        { "enemy_id": "energy_devourer", "count": 5, "interval_seconds": 2.5, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "walker", "count": 25, "interval_seconds": 1.0, "path": "path_south", "delay_seconds": 5 }
+      ]
+    },
+    {
+      "wave": 12,
+      "name": "抗燃精英",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "shellbeast", "count": 8, "interval_seconds": 2.0, "path": "path_north", "delay_seconds": 0, "elite_affixes": ["burn_resist"] },
+        { "enemy_id": "swarm", "count": 35, "interval_seconds": 0.4, "path": "path_south", "delay_seconds": 5 }
+      ]
+    },
+    {
+      "wave": 13,
+      "name": "吸能精英",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "energy_devourer", "count": 8, "interval_seconds": 2.0, "path": "path_north", "delay_seconds": 0, "elite_affixes": ["energy_drinker"] },
+        { "enemy_id": "sprinter", "count": 10, "interval_seconds": 1.0, "path": "path_south", "delay_seconds": 8 }
+      ]
+    },
+    {
+      "wave": 14,
+      "name": "全混合波",
+      "prep_time_seconds": 20,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 15, "interval_seconds": 1.0, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "shellbeast", "count": 5, "interval_seconds": 2.0, "path": "path_north", "delay_seconds": 5 },
+        { "enemy_id": "shielded", "count": 10, "interval_seconds": 1.5, "path": "path_south", "delay_seconds": 0 },
+        { "enemy_id": "sprinter", "count": 8, "interval_seconds": 1.2, "path": "path_south", "delay_seconds": 8 }
+      ]
+    },
+    {
+      "wave": 15,
+      "name": "压力测试",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "swarm", "count": 50, "interval_seconds": 0.3, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "shellbeast", "count": 4, "interval_seconds": 2.0, "path": "path_south", "delay_seconds": 0, "elite_affixes": ["thick_armor", "burn_resist"] },
+        { "enemy_id": "energy_devourer", "count": 5, "interval_seconds": 1.5, "path": "path_south", "delay_seconds": 10 }
+      ]
+    },
+    {
+      "wave": 16,
+      "name": "护盾大军",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "shielded", "count": 20, "interval_seconds": 1.0, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "shielded", "count": 15, "interval_seconds": 1.0, "path": "path_south", "delay_seconds": 5 }
+      ]
+    },
+    {
+      "wave": 17,
+      "name": "三重精英",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "shellbeast", "count": 1, "interval_seconds": 0, "path": "path_north", "delay_seconds": 0, "elite_affixes": ["thick_armor", "burn_resist", "energy_drinker"] },
+        { "enemy_id": "sprinter", "count": 1, "interval_seconds": 0, "path": "path_north", "delay_seconds": 5, "elite_affixes": ["swift", "energy_drinker"] },
+        { "enemy_id": "walker", "count": 1, "interval_seconds": 0, "path": "path_south", "delay_seconds": 10, "elite_affixes": ["thick_armor", "swift"] },
+        { "enemy_id": "swarm", "count": 40, "interval_seconds": 0.4, "path": "path_south", "delay_seconds": 15 }
+      ]
+    },
+    {
+      "wave": 18,
+      "name": "决战前奏",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "walker", "count": 30, "interval_seconds": 0.8, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "shellbeast", "count": 10, "interval_seconds": 1.5, "path": "path_north", "delay_seconds": 5 },
+        { "enemy_id": "shielded", "count": 15, "interval_seconds": 1.0, "path": "path_south", "delay_seconds": 0 },
+        { "enemy_id": "energy_devourer", "count": 10, "interval_seconds": 1.5, "path": "path_south", "delay_seconds": 8 }
+      ]
+    },
+    {
+      "wave": 19,
+      "name": "极限混乱",
+      "prep_time_seconds": 15,
+      "spawn_groups": [
+        { "enemy_id": "swarm", "count": 80, "interval_seconds": 0.25, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "swarm", "count": 80, "interval_seconds": 0.25, "path": "path_south", "delay_seconds": 0 },
+        { "enemy_id": "shellbeast", "count": 5, "interval_seconds": 1.5, "path": "path_north", "delay_seconds": 15, "elite_affixes": ["thick_armor"] },
+        { "enemy_id": "sprinter", "count": 10, "interval_seconds": 0.8, "path": "path_south", "delay_seconds": 20, "elite_affixes": ["swift"] }
+      ]
+    },
+    {
+      "wave": 20,
+      "name": "Boss: 吞线母体",
+      "prep_time_seconds": 30,
+      "spawn_groups": [
+        { "enemy_id": "line_devourer", "count": 1, "interval_seconds": 0, "path": "path_north", "delay_seconds": 0 },
+        { "enemy_id": "walker", "count": 30, "interval_seconds": 1.0, "path": "path_south", "delay_seconds": 15 }
+      ]
+    }
+  ]
+}

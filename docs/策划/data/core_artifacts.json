@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "category": "core",
+  "comment": "6 件核心圣器。只能装备在能源塔上，1 个槽位。Lv.5 解锁，Lv.10 觉醒（觉醒效果叠加在主效果之上）。pre-run 玩家选 1 件作为本局核心圣器。",
+
+  "core_artifacts": [
+    {
+      "id": "stabilizer",
+      "name": "稳压圣器",
+      "category": "core",
+      "rarity": "white",
+      "streams": [0],
+      "description": "距离衰减最低有效供能从 25% 提高到 40%；供能半径 +1",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "custom", "logic_id": "modify_energy_formula", "params": { "min_attenuation": 0.40 } },
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "range", "modifier": 1, "multiplicative": false }
+      ],
+      "lv10_awakening": [
+        { "type": "custom", "logic_id": "modify_energy_formula", "params": { "min_attenuation": 0.50 } }
+      ],
+      "downsides": [],
+      "implementation_notes": "已应用 §3.4 调整: 最低 35% → 40% + 半径 +1。修改 EnergySystem 的 min_attenuation 常量（仅本局生效）。觉醒后再上调到 50%。"
+    },
+    {
+      "id": "conductor",
+      "name": "导线圣器",
+      "category": "core",
+      "rarity": "white",
+      "streams": [3, 4],
+      "description": "能源线转伤效率 +30%；多线叠加递减放宽（[1.00, 0.85, 0.70, 0.55]）",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "energy_line_modifier", "target": "all_lines", "modifier_type": "transmission_efficiency", "value": 0.30 },
+        { "type": "custom", "logic_id": "modify_decay_curve", "params": { "new_curve": [1.00, 0.85, 0.70, 0.55, 0.40, 0.30] } }
+      ],
+      "lv10_awakening": [
+        { "type": "energy_line_modifier", "target": "all_lines", "modifier_type": "line_damage", "value": 0.30 },
+        { "type": "custom", "logic_id": "extend_decay_curve_layer", "params": { "extra_layer_value": 0.20 } }
+      ],
+      "downsides": [],
+      "implementation_notes": "线流核心。觉醒效果: 所有线伤额外 +30%（叠加），叠加曲线再加一层 0.20。"
+    },
+    {
+      "id": "energy_storage",
+      "name": "蓄能圣器",
+      "category": "core",
+      "rarity": "white",
+      "streams": [5, 7],
+      "description": "主动能量获取 +25%，主动技能消耗 -10%",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "energy_gain", "modifier": 0.25, "multiplicative": true },
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "skill_cost", "modifier": -0.10, "multiplicative": true }
+      ],
+      "lv10_awakening": [
+        { "type": "stat_modifier", "target": "energy_tower", "stat": "skill_cooldown", "modifier": -0.25, "multiplicative": true }
+      ],
+      "downsides": [],
+      "implementation_notes": "技能流频率派核心。觉醒后所有技能 CD -25%。"
+    },
+    {
+      "id": "focus",
+      "name": "集焦圣器",
+      "category": "core",
+      "rarity": "white",
+      "streams": [1],
+      "description": "距能源塔 ≤2 格的塔，功率系数 +50%",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "custom", "logic_id": "buff_nearby_energy_tower_power_ratio", "params": { "range_grids": 2, "ratio_bonus": 0.50 } }
+      ],
+      "lv10_awakening": [
+        { "type": "custom", "logic_id": "buff_nearby_energy_tower_power_ratio", "params": { "range_grids": 2, "ratio_bonus": 1.00 } }
+      ],
+      "downsides": [],
+      "implementation_notes": "单塔核心流核心。觉醒后 +50% → +100%（覆盖，不是叠加）。"
+    },
+    {
+      "id": "supercharge",
+      "name": "充能圣器",
+      "category": "core",
+      "rarity": "white",
+      "streams": [6, 7],
+      "description": "击杀任何敌人 +1 主动能量",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        {
+          "type": "skill_synergy",
+          "trigger": "on_kill",
+          "effect": { "type": "custom", "logic_id": "grant_active_energy", "params": { "energy": 1 } }
+        }
+      ],
+      "lv10_awakening": [
+        {
+          "type": "skill_synergy",
+          "trigger": "on_kill",
+          "effect": { "type": "custom", "logic_id": "grant_active_energy_by_enemy_tier", "params": { "normal": 2, "elite": 10, "boss": 50 } }
+        }
+      ],
+      "downsides": [],
+      "implementation_notes": "技能流爆发派核心。Lv.5 时基础 +1 能量/击杀；Lv.10 觉醒后按敌人类型 +2/+10/+50。觉醒效果替换基础效果（不叠加）。"
+    },
+    {
+      "id": "resonance",
+      "name": "共振圣器",
+      "category": "core",
+      "rarity": "white",
+      "streams": [10],
+      "description": "同种圣器 ≥2 件时，能源塔总功率 +15%",
+      "shop_price": 100,
+      "drop_weight": 60,
+      "effects": [
+        { "type": "custom", "logic_id": "resonance_power_bonus", "params": { "min_count_same_type": 2, "bonus_ratio": 0.15 } }
+      ],
+      "lv10_awakening": [
+        { "type": "custom", "logic_id": "resonance_extra_per_extra", "params": { "per_extra_bonus": 0.05, "cap": 0.50 } }
+      ],
+      "downsides": [],
+      "implementation_notes": "已应用 §3.4 调整: ≥3 件 +20% → ≥2 件 +15%。觉醒效果: 同种每多 1 件再 +5%, cap +50%（含基础 15%）。'同种' 定义为相同 id 的圣器。"
+    }
+  ]
+}

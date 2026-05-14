@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "comment": "6 主动技能。消耗主动能量，由能源塔释放。",
+
+  "skills": [
+    {
+      "id": "energy_tower_overdrive",
+      "name": "能源塔超频",
+      "cost": 60,
+      "cooldown_seconds": 60,
+      "effect_type": "buff",
+      "buff_target": "energy_tower",
+      "buff_stat": "total_power",
+      "buff_modifier": 0.50,
+      "buff_duration": 8,
+      "description": "8 秒内总功率 +50%",
+      "vfx_id": "overdrive_aura",
+      "implementation_notes": "重算所有 P_share。视觉: 能源塔外圈展开 + 地面符文亮起。"
+    },
+    {
+      "id": "lightning_strike",
+      "name": "天降雷电",
+      "cost": 40,
+      "cooldown_seconds": 30,
+      "effect_type": "instant_damage",
+      "damage": 800,
+      "aoe_radius": 3,
+      "max_targets": 6,
+      "damage_type": "lightning",
+      "description": "对目标区域 3 格内最多 6 个敌人造成 800 雷电伤害",
+      "vfx_id": "lightning_strike",
+      "implementation_notes": "玩家点击目标位置释放。AOE 内最近 6 个敌人受满伤害。可附加感电状态（30% 概率）。"
+    },
+    {
+      "id": "energy_line_overload",
+      "name": "能源线过载",
+      "cost": 50,
+      "cooldown_seconds": 45,
+      "effect_type": "buff",
+      "buff_target": "all_lines",
+      "buff_stat": "transmission_efficiency",
+      "buff_modifier": 0.80,
+      "buff_duration": 8,
+      "description": "8 秒内所有能源线转伤效率 +80%，并附带 30% 减速",
+      "vfx_id": "line_overload",
+      "implementation_notes": "Buff 期间所有 P_line × 0.35 × 1.80 计算线伤；同时所有踩在线上的怪物 -30% 移速。视觉: 所有线脉冲式爆闪。"
+    },
+    {
+      "id": "emergency_shield",
+      "name": "紧急护盾",
+      "cost": 45,
+      "cooldown_seconds": 60,
+      "effect_type": "shield",
+      "shield_hp": 200,
+      "shield_duration": 10,
+      "description": "能源塔获得 200 HP 临时护盾，持续 10 秒",
+      "vfx_id": "emergency_shield",
+      "implementation_notes": "护盾在受伤时优先抵消。10 秒后剩余护盾消失。视觉: 能源塔周围出现六边形护盾光罩。"
+    },
+    {
+      "id": "global_collect",
+      "name": "全域回收",
+      "cost": 30,
+      "cooldown_seconds": 30,
+      "effect_type": "utility",
+      "description": "吸取地图上所有金币和掉落物",
+      "vfx_id": "global_collect",
+      "implementation_notes": "所有未拾取的 gold sprites 和 material drops 飞向能源塔（动画 1s）。无 buff 效果。"
+    },
+    {
+      "id": "tower_reboot",
+      "name": "塔体重启",
+      "cost": 35,
+      "cooldown_seconds": 40,
+      "effect_type": "buff",
+      "buff_target": "all_towers",
+      "buff_stat": "trigger_rate",
+      "buff_modifier": 0.50,
+      "buff_duration": 5,
+      "description": "清除附近塔的负面状态，5 秒内触发率 +50%",
+      "vfx_id": "tower_reboot",
+      "implementation_notes": "1) 清除场上所有基础塔身上的 debuff（如反噬效果不算 debuff，是常驻）。2) 5 秒内圣器特效触发率 +50%（如 火种 触发率从 100% → 150%）。视觉: 所有塔短暂变白闪烁。"
+    }
+  ]
+}

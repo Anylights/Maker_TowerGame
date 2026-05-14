@@ -1,0 +1,158 @@
+{
+  "schema_version": "1.0",
+  "comment": "6 普通怪 + 4 精英词缀 + 2 Boss。HP 是 Wave 1 起手值，按 hp_growth_per_wave (1.13) 自动缩放。",
+
+  "normal_enemies": [
+    {
+      "id": "walker",
+      "name": "行尸",
+      "is_boss": false,
+      "base_hp": 50,
+      "base_speed": 1.0,
+      "armor_ratio": 0,
+      "reward_gold": 5,
+      "reward_material": 0,
+      "reward_energy": 0,
+      "sprite_color": "#aa3333",
+      "implementation_notes": "标准敌人，无特殊属性。每波刷量 15-25"
+    },
+    {
+      "id": "swarm",
+      "name": "群虫",
+      "is_boss": false,
+      "base_hp": 25,
+      "base_speed": 1.2,
+      "armor_ratio": 0,
+      "reward_gold": 2,
+      "reward_material": 0,
+      "reward_energy": 0,
+      "sprite_color": "#aa6633",
+      "implementation_notes": "低 HP 多数量。出现时刷量 ×2（即 30-50 只）"
+    },
+    {
+      "id": "shellbeast",
+      "name": "甲壳兽",
+      "is_boss": false,
+      "base_hp": 80,
+      "base_speed": 0.6,
+      "armor_ratio": 0.5,
+      "reward_gold": 10,
+      "reward_material": 1,
+      "reward_energy": 0,
+      "sprite_color": "#666633",
+      "implementation_notes": "50% 物理减伤。腐蚀流克制。"
+    },
+    {
+      "id": "sprinter",
+      "name": "疾行者",
+      "is_boss": false,
+      "base_hp": 35,
+      "base_speed": 2.0,
+      "armor_ratio": 0,
+      "reward_gold": 6,
+      "reward_material": 0,
+      "reward_energy": 0,
+      "sprite_color": "#33aa33",
+      "implementation_notes": "高速，减速/冻结/能源线克制。"
+    },
+    {
+      "id": "shielded",
+      "name": "护盾怪",
+      "is_boss": false,
+      "base_hp": 50,
+      "base_speed": 1.0,
+      "armor_ratio": 0,
+      "shield_hp": 30,
+      "status_immunity": ["burn", "freeze", "shock", "corrode"],
+      "reward_gold": 8,
+      "reward_material": 0,
+      "reward_energy": 0,
+      "sprite_color": "#3333aa",
+      "implementation_notes": "盾破前免疫所有 status effects。盾在受到伤害时自动恢复 0（不可恢复，破了就破）。"
+    },
+    {
+      "id": "energy_devourer",
+      "name": "吞能者",
+      "is_boss": false,
+      "base_hp": 60,
+      "base_speed": 1.0,
+      "armor_ratio": 0,
+      "special_logic_id": "reduce_line_damage_when_passing",
+      "reward_gold": 8,
+      "reward_material": 0,
+      "reward_energy": 0,
+      "sprite_color": "#9933aa",
+      "implementation_notes": "经过能源线时该线伤害 -40%（仅对自己；其他怪不受影响）。塔本体输出克制。"
+    }
+  ],
+
+  "elite_affixes": [
+    {
+      "id": "thick_armor",
+      "name": "厚甲",
+      "modifiers": {
+        "hp_multiplier": 1.5,
+        "armor_bonus": 2.0
+      },
+      "implementation_notes": "护甲 +200% (即 ×3 物理减伤)。需要破甲。"
+    },
+    {
+      "id": "swift",
+      "name": "迅捷",
+      "modifiers": {
+        "hp_multiplier": 1.3,
+        "speed_multiplier": 1.5
+      },
+      "implementation_notes": "速度 +50%。需要控制。"
+    },
+    {
+      "id": "burn_resist",
+      "name": "抗燃",
+      "modifiers": {
+        "hp_multiplier": 1.4,
+        "burn_resist": 0.7
+      },
+      "implementation_notes": "燃烧时间 -70%。逼迫换伤害类型。"
+    },
+    {
+      "id": "energy_drinker",
+      "name": "吸能",
+      "modifiers": {
+        "hp_multiplier": 1.4,
+        "line_heal_per_sec": 5
+      },
+      "implementation_notes": "经过能源线时每秒回血 5。需要塔本体输出。"
+    }
+  ],
+
+  "bosses": [
+    {
+      "id": "shatter_titan",
+      "name": "裂山巨像",
+      "is_boss": true,
+      "base_hp": 1900,
+      "base_speed": 0.5,
+      "armor_ratio": 0,
+      "special_logic_id": "shatter_titan_logic",
+      "reward_gold": 200,
+      "reward_material": 50,
+      "reward_energy": 30,
+      "sprite_color": "#664422",
+      "implementation_notes": "Wave 10 mid-boss。机制：1) 每 15s 获得护甲 +100%（持续 8s）；2) 移动到地形物件上时砸碎它（玩家失去那块资源）。腐蚀流和集中火力克制。"
+    },
+    {
+      "id": "line_devourer",
+      "name": "吞线母体",
+      "is_boss": true,
+      "base_hp": 7200,
+      "base_speed": 0.5,
+      "armor_ratio": 0,
+      "special_logic_id": "line_devourer_logic",
+      "reward_gold": 500,
+      "reward_material": 150,
+      "reward_energy": 100,
+      "sprite_color": "#6622aa",
+      "implementation_notes": "Wave 20 final boss。机制：1) 经过能源线时该线伤害降为 0 + 此 Boss 获得护盾（100 HP，每条线给一次）；2) 每 30s 吸取场上 30% 总功率持续 5s。强迫所有构筑都得为它预留方案。"
+    }
+  ]
+}
