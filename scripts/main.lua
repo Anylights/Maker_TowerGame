@@ -103,6 +103,9 @@ function HandleUpdate(eventType, eventData)
     -- 怪物
     Monster.UpdateMonsters(dt)
 
+    -- 能源线伤害
+    EnergyTower.UpdateLineDamage(dt)
+
     -- 塔攻击 & 炮弹
     Tower.UpdateTowerAttacks(dt)
     Tower.UpdateProjectiles(dt)

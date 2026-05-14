@@ -6,6 +6,7 @@ local Cfg = require("Config")
 local CONFIG = Cfg.CONFIG
 local MOEBIUS = Cfg.MOEBIUS
 local GS = Cfg.GS
+local EnergyTower -- lazy require to avoid circular dependency
 
 local M = {}
 
@@ -166,6 +167,34 @@ function M.CreateRangeCircle()
     mat:SetShaderParameter("Metallic", Variant(0.0))
     mat:SetShaderParameter("Roughness", Variant(0.5))
     geom:SetMaterial(mat)
+
+    GS.rangeCircleNode_ = node
+end
+
+-- ============================================================================
+-- 范围圆动态更新（升级后调用）
+-- ============================================================================
+
+function M.UpdateRangeCircle()
+    local node = GS.rangeCircleNode_
+    if not node then return end
+
+    if not EnergyTower then
+        EnergyTower = require("EnergyTower")
+    end
+
+    local geom = node:GetComponent("CustomGeometry")
+    geom:BeginGeometry(0, LINE_LIST)
+
+    local segments = 64
+    local r = EnergyTower.GetEnergyRange() + 0.5
+    for i = 0, segments - 1 do
+        local a1 = (i / segments) * math.pi * 2
+        local a2 = ((i + 1) / segments) * math.pi * 2
+        geom:DefineVertex(Vector3(math.cos(a1) * r, 0, math.sin(a1) * r))
+        geom:DefineVertex(Vector3(math.cos(a2) * r, 0, math.sin(a2) * r))
+    end
+    geom:Commit()
 end
 
 -- ============================================================================

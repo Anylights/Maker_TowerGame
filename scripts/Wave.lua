@@ -15,34 +15,34 @@ local M = {}
 -- 阶段: 开局(1-5) / 扩张(6-10) / 构筑(11-15) / 压力(16-19) / 决战(20)
 M.WAVES = {
     -- === 开局 (1-5): 学会建塔、供能 ===
-    [1]  = { monsters = { { type = "zombie", count = 5 } },                              interval = 3.0,  prepTime = 10, reward = { gold = 30 } },
-    [2]  = { monsters = { { type = "zombie", count = 8 } },                              interval = 2.5,  prepTime = 8,  reward = { gold = 40 } },
-    [3]  = { monsters = { { type = "zombie", count = 6 }, { type = "swarm", count = 8 } }, interval = 2.0, prepTime = 8,  reward = { gold = 50 } },
-    [4]  = { monsters = { { type = "swarm", count = 15 } },                              interval = 1.2,  prepTime = 8,  reward = { gold = 40 } },
-    [5]  = { monsters = { { type = "zombie", count = 8 }, { type = "sprinter", count = 3 } }, interval = 2.0, prepTime = 10, reward = { gold = 60 } },
+    [1]  = { monsters = { { type = "zombie", count = 5 } },                              interval = 3.0,  prepTime = 10, reward = { gold = 30,  material = 10 } },
+    [2]  = { monsters = { { type = "zombie", count = 8 } },                              interval = 2.5,  prepTime = 8,  reward = { gold = 40,  material = 12 } },
+    [3]  = { monsters = { { type = "zombie", count = 6 }, { type = "swarm", count = 8 } }, interval = 2.0, prepTime = 8,  reward = { gold = 50,  material = 15 } },
+    [4]  = { monsters = { { type = "swarm", count = 15 } },                              interval = 1.2,  prepTime = 8,  reward = { gold = 40,  material = 15 } },
+    [5]  = { monsters = { { type = "zombie", count = 8 }, { type = "sprinter", count = 3 } }, interval = 2.0, prepTime = 10, reward = { gold = 60,  material = 20 } },
 
     -- === 扩张 (6-10): 引入更多怪物类型 ===
-    [6]  = { monsters = { { type = "armored", count = 4 }, { type = "zombie", count = 6 } },    interval = 2.0, prepTime = 10, reward = { gold = 70 } },
-    [7]  = { monsters = { { type = "sprinter", count = 8 }, { type = "swarm", count = 10 } },   interval = 1.5, prepTime = 8,  reward = { gold = 80 } },
-    [8]  = { monsters = { { type = "shielded", count = 4 }, { type = "zombie", count = 8 } },   interval = 2.0, prepTime = 8,  reward = { gold = 90 } },
-    [9]  = { monsters = { { type = "energyEater", count = 3 }, { type = "armored", count = 4 }, { type = "swarm", count = 8 } }, interval = 1.8, prepTime = 10, reward = { gold = 100 } },
-    [10] = { monsters = { { type = "armored", count = 6 }, { type = "shielded", count = 4 }, { type = "sprinter", count = 5 } }, interval = 1.5, prepTime = 12, reward = { gold = 120 } },
+    [6]  = { monsters = { { type = "armored", count = 4 }, { type = "zombie", count = 6 } },    interval = 2.0, prepTime = 10, reward = { gold = 70,  material = 25 } },
+    [7]  = { monsters = { { type = "sprinter", count = 8 }, { type = "swarm", count = 10 } },   interval = 1.5, prepTime = 8,  reward = { gold = 80,  material = 30 } },
+    [8]  = { monsters = { { type = "shielded", count = 4 }, { type = "zombie", count = 8 } },   interval = 2.0, prepTime = 8,  reward = { gold = 90,  material = 35 } },
+    [9]  = { monsters = { { type = "energyEater", count = 3 }, { type = "armored", count = 4 }, { type = "swarm", count = 8 } }, interval = 1.8, prepTime = 10, reward = { gold = 100, material = 40 } },
+    [10] = { monsters = { { type = "armored", count = 6 }, { type = "shielded", count = 4 }, { type = "sprinter", count = 5 } }, interval = 1.5, prepTime = 12, reward = { gold = 120, material = 50 } },
 
     -- === 构筑 (11-15): 流派成型，压力上升 ===
-    [11] = { monsters = { { type = "zombie", count = 12 }, { type = "swarm", count = 15 }, { type = "sprinter", count = 5 } }, interval = 1.2, prepTime = 10, reward = { gold = 130 } },
-    [12] = { monsters = { { type = "armored", count = 8 }, { type = "energyEater", count = 4 } },  interval = 1.8, prepTime = 8,  reward = { gold = 140 } },
-    [13] = { monsters = { { type = "shielded", count = 6 }, { type = "sprinter", count = 8 }, { type = "swarm", count = 12 } }, interval = 1.0, prepTime = 10, reward = { gold = 150 } },
-    [14] = { monsters = { { type = "energyEater", count = 6 }, { type = "armored", count = 6 }, { type = "zombie", count = 10 } }, interval = 1.2, prepTime = 8, reward = { gold = 160 } },
-    [15] = { monsters = { { type = "shielded", count = 8 }, { type = "armored", count = 8 }, { type = "sprinter", count = 6 } }, interval = 1.0, prepTime = 12, reward = { gold = 180 } },
+    [11] = { monsters = { { type = "zombie", count = 12 }, { type = "swarm", count = 15 }, { type = "sprinter", count = 5 } }, interval = 1.2, prepTime = 10, reward = { gold = 130, material = 55 } },
+    [12] = { monsters = { { type = "armored", count = 8 }, { type = "energyEater", count = 4 } },  interval = 1.8, prepTime = 8,  reward = { gold = 140, material = 60 } },
+    [13] = { monsters = { { type = "shielded", count = 6 }, { type = "sprinter", count = 8 }, { type = "swarm", count = 12 } }, interval = 1.0, prepTime = 10, reward = { gold = 150, material = 70 } },
+    [14] = { monsters = { { type = "energyEater", count = 6 }, { type = "armored", count = 6 }, { type = "zombie", count = 10 } }, interval = 1.2, prepTime = 8, reward = { gold = 160, material = 75 } },
+    [15] = { monsters = { { type = "shielded", count = 8 }, { type = "armored", count = 8 }, { type = "sprinter", count = 6 } }, interval = 1.0, prepTime = 12, reward = { gold = 180, material = 85 } },
 
     -- === 压力 (16-19): 大量混合 ===
-    [16] = { monsters = { { type = "swarm", count = 25 }, { type = "sprinter", count = 8 }, { type = "energyEater", count = 4 } }, interval = 0.8, prepTime = 10, reward = { gold = 200 } },
-    [17] = { monsters = { { type = "armored", count = 10 }, { type = "shielded", count = 6 }, { type = "zombie", count = 15 } }, interval = 1.0, prepTime = 10, reward = { gold = 220 } },
-    [18] = { monsters = { { type = "energyEater", count = 8 }, { type = "sprinter", count = 10 }, { type = "swarm", count = 20 } }, interval = 0.8, prepTime = 10, reward = { gold = 250 } },
-    [19] = { monsters = { { type = "armored", count = 12 }, { type = "shielded", count = 8 }, { type = "energyEater", count = 6 }, { type = "sprinter", count = 8 } }, interval = 0.8, prepTime = 12, reward = { gold = 300 } },
+    [16] = { monsters = { { type = "swarm", count = 25 }, { type = "sprinter", count = 8 }, { type = "energyEater", count = 4 } }, interval = 0.8, prepTime = 10, reward = { gold = 200, material = 100 } },
+    [17] = { monsters = { { type = "armored", count = 10 }, { type = "shielded", count = 6 }, { type = "zombie", count = 15 } }, interval = 1.0, prepTime = 10, reward = { gold = 220, material = 110 } },
+    [18] = { monsters = { { type = "energyEater", count = 8 }, { type = "sprinter", count = 10 }, { type = "swarm", count = 20 } }, interval = 0.8, prepTime = 10, reward = { gold = 250, material = 130 } },
+    [19] = { monsters = { { type = "armored", count = 12 }, { type = "shielded", count = 8 }, { type = "energyEater", count = 6 }, { type = "sprinter", count = 8 } }, interval = 0.8, prepTime = 12, reward = { gold = 300, material = 150 } },
 
     -- === 决战 (20): Boss 波 ===
-    [20] = { monsters = { { type = "armored", count = 15 }, { type = "shielded", count = 10 }, { type = "energyEater", count = 8 }, { type = "sprinter", count = 10 }, { type = "swarm", count = 20 } }, interval = 0.6, prepTime = 15, reward = { gold = 500 } },
+    [20] = { monsters = { { type = "armored", count = 15 }, { type = "shielded", count = 10 }, { type = "energyEater", count = 8 }, { type = "sprinter", count = 10 }, { type = "swarm", count = 20 } }, interval = 0.6, prepTime = 15, reward = { gold = 500, material = 250 } },
 }
 
 M.TOTAL_WAVES = 20
@@ -158,10 +158,12 @@ function M.Update(dt)
             -- 波次完成，发放奖励
             local waveDef = M.WAVES[GS.currentWave]
             if waveDef.reward then
-                if waveDef.reward.gold then
-                    GS.gold = GS.gold + waveDef.reward.gold
-                    print(string.format("[Wave] Wave %d cleared! Reward: +%d gold", GS.currentWave, waveDef.reward.gold))
-                end
+                local rGold = waveDef.reward.gold or 0
+                local rMat = waveDef.reward.material or 0
+                if rGold > 0 then GS.gold = GS.gold + rGold end
+                if rMat > 0 then GS.material = GS.material + rMat end
+                print(string.format("[Wave] Wave %d cleared! Reward: +%d gold, +%d material",
+                    GS.currentWave, rGold, rMat))
             end
 
             -- 是否是最后一波

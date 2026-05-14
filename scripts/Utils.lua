@@ -17,6 +17,7 @@ local projectileMat_ = nil
 local hpBgMat_ = nil
 local lootGoldMat_ = nil
 local lootEnergyMat_ = nil
+local lootMaterialMat_ = nil
 
 function M.GetMonsterMaterial()
     if monsterMat_ then return monsterMat_ end
@@ -71,6 +72,17 @@ function M.GetLootEnergyMaterial()
     lootEnergyMat_:SetShaderParameter("Metallic", Variant(0.0))
     lootEnergyMat_:SetShaderParameter("Roughness", Variant(1.0))
     return lootEnergyMat_
+end
+
+function M.GetLootMaterialMaterial()
+    if lootMaterialMat_ then return lootMaterialMat_ end
+    lootMaterialMat_ = Material:new()
+    lootMaterialMat_:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+    lootMaterialMat_:SetShaderParameter("MatDiffColor", Variant(MOEBIUS.LootMaterialDiff))
+    lootMaterialMat_:SetShaderParameter("MatEmissiveColor", Variant(MOEBIUS.LootMaterialEmit))
+    lootMaterialMat_:SetShaderParameter("Metallic", Variant(0.0))
+    lootMaterialMat_:SetShaderParameter("Roughness", Variant(1.0))
+    return lootMaterialMat_
 end
 
 -- ============================================================================
@@ -173,7 +185,7 @@ end
 -- 掉落物
 -- ============================================================================
 
-function M.SpawnLoot(pos, lootType)
+function M.SpawnLoot(pos, lootType, amount)
     local node = GS.scene:CreateChild("Loot_" .. lootType)
     local s = 0.6
     node.scale = Vector3(s, s, s)
@@ -183,6 +195,8 @@ function M.SpawnLoot(pos, lootType)
     model:SetModel(cache:GetResource("Model", "Meshes/TD/detail-crystal.mdl"))
     if lootType == "gold" then
         model:SetMaterial(M.GetLootGoldMaterial())
+    elseif lootType == "material" then
+        model:SetMaterial(M.GetLootMaterialMaterial())
     else
         model:SetMaterial(M.GetLootEnergyMaterial())
     end
@@ -190,6 +204,7 @@ function M.SpawnLoot(pos, lootType)
     local loot = {
         node = node,
         type = lootType,
+        amount = amount,
         timer = 0,
         collecting = false,
     }
@@ -214,7 +229,11 @@ function M.UpdateLoots(dt)
                 local dist = dir:Length()
                 if dist < 0.4 then
                     if l.type == "gold" then
-                        GS.gold = GS.gold + CONFIG.MonsterGoldDrop
+                        GS.gold = GS.gold + (l.amount or CONFIG.MonsterGoldDrop)
+                    elseif l.type == "material" then
+                        GS.material = GS.material + (l.amount or 5)
+                    elseif l.type == "energy" then
+                        GS.energy = GS.energy + (l.amount or CONFIG.MonsterEnergyDrop)
                     end
                     l.node:Remove()
                     table.remove(GS.loots, i)

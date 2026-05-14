@@ -233,7 +233,7 @@ function M.HandleGridHover()
     GS.hoverGZ = gz
 
     local dist = math.sqrt(gx * gx + gz * gz)
-    local inRange = dist <= CONFIG.EnergyRange + 0.01
+    local inRange = dist <= EnergyTower.GetEnergyRange() + 0.01
     local isEnergyTower = (gx == 0 and gz == 0)
     local isOccupied = false
     for _, tower in ipairs(GS.towers) do

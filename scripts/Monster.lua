@@ -28,6 +28,7 @@ M.TYPES = {
         emissive = Color(0.35, 0.08, 0.05),
         goldDrop = 15,
         energyDrop = 5,
+        materialDrop = 2,
     },
     swarm = {
         name = "群虫",
@@ -38,6 +39,7 @@ M.TYPES = {
         emissive = Color(0.08, 0.25, 0.05),
         goldDrop = 6,
         energyDrop = 2,
+        materialDrop = 1,
     },
     armored = {
         name = "甲壳兽",
@@ -48,6 +50,7 @@ M.TYPES = {
         emissive = Color(0.20, 0.12, 0.05),
         goldDrop = 30,
         energyDrop = 10,
+        materialDrop = 8,
         armor = 5,                               -- 每次受击减伤
     },
     sprinter = {
@@ -59,6 +62,7 @@ M.TYPES = {
         emissive = Color(0.10, 0.30, 0.50),
         goldDrop = 20,
         energyDrop = 8,
+        materialDrop = 4,
     },
     shielded = {
         name = "护盾怪",
@@ -69,6 +73,7 @@ M.TYPES = {
         emissive = Color(0.30, 0.10, 0.40),
         goldDrop = 25,
         energyDrop = 12,
+        materialDrop = 6,
         shield = 60,                             -- 能量盾
     },
     energyEater = {
@@ -80,6 +85,7 @@ M.TYPES = {
         emissive = Color(0.35, 0.25, 0.05),
         goldDrop = 35,
         energyDrop = 15,
+        materialDrop = 10,
     },
 }
 
@@ -160,6 +166,7 @@ function M.SpawnMonster(monsterType)
         shieldNode = shieldNode,
         goldDrop = typeDef.goldDrop,
         energyDrop = typeDef.energyDrop,
+        materialDrop = typeDef.materialDrop or 0,
     }
     table.insert(GS.monsters, monster)
 end
@@ -242,9 +249,12 @@ function M.KillMonster(m)
     local pos = m.node.position
     GS.monstersKilled = GS.monstersKilled + 1
 
-    Utils.SpawnLoot(pos, "gold")
+    Utils.SpawnLoot(pos, "gold", m.goldDrop)
     if m.energyDrop and m.energyDrop > 0 then
-        Utils.SpawnLoot(Vector3(pos.x + 0.3, pos.y, pos.z + 0.3), "energy")
+        Utils.SpawnLoot(Vector3(pos.x + 0.3, pos.y, pos.z + 0.3), "energy", m.energyDrop)
+    end
+    if m.materialDrop and m.materialDrop > 0 then
+        Utils.SpawnLoot(Vector3(pos.x - 0.3, pos.y, pos.z - 0.3), "material", m.materialDrop)
     end
 
     M.DestroyMonster(m)
