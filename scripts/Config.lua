@@ -163,6 +163,9 @@ M.GS = {
     etHP = 0,
     etMaxHP = 0,
 
+    -- 游戏速度 (1, 2, 4)
+    gameSpeed = 1,
+
     -- 游戏结束
     gameOver = false,
 
@@ -185,6 +188,9 @@ M.GS = {
     etHPBg = nil,
     etHPFill = nil,
     etFillMat = nil,
+
+    -- 场景物件 { node, type, gx, gz, hp, maxHp, buffType, buffValue, ... }
+    terrainObjects = {},
 
     -- 波次状态
     currentWave = 0,

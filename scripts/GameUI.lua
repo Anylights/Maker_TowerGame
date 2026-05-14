@@ -20,6 +20,9 @@ local waveLabel_ = nil
 local powerLabel_ = nil
 local previewLabel_ = nil
 
+-- 速度指示器
+local speedLabel_ = nil
+
 -- 升级面板
 local upgradePanel_ = nil
 local upgradeLevelLabel_ = nil
@@ -97,6 +100,12 @@ function M.CreateGameUI()
         textAlign = "center",
     }
 
+    speedLabel_ = UI.Label {
+        text = "x1",
+        fontSize = 14,
+        fontColor = { 180, 255, 180, 220 },
+    }
+
     -- 升级面板组件
     upgradeLevelLabel_ = UI.Label {
         text = "",
@@ -166,12 +175,13 @@ function M.CreateGameUI()
                         borderRadius = 6, paddingX = 12, paddingY = 8,
                         children = { goldLabel_, materialLabel_, energyLabel_, costLabel_ }
                     },
-                    -- 中：波次信息 + 下一波预告
+                    -- 中：波次信息 + 下一波预告 + 速度
                     UI.Panel {
                         flexDirection = "column", gap = 3,
                         backgroundColor = { 0, 0, 0, 140 },
                         borderRadius = 6, paddingX = 12, paddingY = 8,
-                        children = { waveLabel_, previewLabel_ }
+                        alignItems = "center",
+                        children = { waveLabel_, previewLabel_, speedLabel_ }
                     },
                     -- 右：能源统计 + 功率守恒
                     UI.Panel {
@@ -318,6 +328,21 @@ function M.RefreshUI()
         end
     end
 
+    -- 速度指示器
+    if speedLabel_ then
+        local spd = GS.gameSpeed
+        if spd == 1 then
+            speedLabel_:SetText("[Tab] Speed: x1")
+            speedLabel_:SetStyle({ fontColor = { 180, 255, 180, 220 } })
+        elseif spd == 2 then
+            speedLabel_:SetText("[Tab] Speed: x2 >>")
+            speedLabel_:SetStyle({ fontColor = { 255, 255, 100, 240 } })
+        else
+            speedLabel_:SetText("[Tab] Speed: x4 >>>>")
+            speedLabel_:SetStyle({ fontColor = { 255, 140, 80, 255 } })
+        end
+    end
+
     -- 波次信息
     if waveLabel_ then
         waveLabel_:SetText(Wave.GetWaveInfo())
@@ -353,7 +378,7 @@ function M.UpdateHintLabel()
     local EnergyTower = require("EnergyTower")
 
     if not GS.hoverOnMap then
-        hintLabel_:SetText("LClick: Build | X: Sell | U: Upgrade | MMB: Pan | Scroll: Zoom | Space: Skip")
+        hintLabel_:SetText("LClick: Build | X: Sell | U: Upgrade | Tab: Speed | MMB: Pan | Scroll: Zoom | Space: Skip")
         if upgradePanelVisible_ then
             M.HideUpgradePanel()
         end
@@ -394,19 +419,38 @@ function M.UpdateHintLabel()
         end
     elseif isOccupied then
         if upgradePanelVisible_ then M.HideUpgradePanel() end
-        for idx, tower in ipairs(GS.towers) do
-            if tower.gx == gx and tower.gz == gz then
-                local att = EnergyTower.CalcAttenuation(tower.dist)
-                local dmg = CONFIG.TowerBaseDmg * att
-                -- 拆除返还信息
-                local ratio = GS.wavePhase == "preparing" and 0.7 or 0.4
-                local origCost = Tower.GetTowerOriginalCost(idx)
-                local refund = math.floor(origCost * ratio + 0.5)
-                hintLabel_:SetText(string.format(
-                    "Tower (%d,%d) | Dmg: %.1f | Pwr: %.0f%% | [X] Sell: %d (%.0f%%)",
-                    gx, gz, dmg, tower.ratio * 100, refund, ratio * 100
-                ))
-                break
+        -- 检查是塔还是场景物件
+        local Terrain = require("Terrain")
+        local terrObj = Terrain.GetObjectAt(gx, gz)
+        if terrObj then
+            local tDef = Terrain.TYPES[terrObj.type]
+            local buffStr = ""
+            if tDef and tDef.buff_type then
+                buffStr = string.format(" | Buff: +%.0f%% %s", tDef.buff_value * 100, tDef.buff_type)
+            end
+            hintLabel_:SetText(string.format(
+                "%s (%d,%d) | HP: %d/%d%s",
+                tDef and tDef.name or terrObj.type, gx, gz,
+                terrObj.hp, terrObj.maxHp, buffStr
+            ))
+        else
+            for idx, tower in ipairs(GS.towers) do
+                if tower.gx == gx and tower.gz == gz then
+                    local att = EnergyTower.CalcAttenuation(tower.dist)
+                    local dmg = CONFIG.TowerBaseDmg * att
+                    -- 攻速倍率
+                    local spdMult = math.max(0.30, tower.ratio * #GS.towers)
+                    local fireInt = CONFIG.TowerFireInterval / spdMult
+                    -- 拆除返还信息
+                    local ratio = GS.wavePhase == "preparing" and 0.7 or 0.4
+                    local origCost = Tower.GetTowerOriginalCost(idx)
+                    local refund = math.floor(origCost * ratio + 0.5)
+                    hintLabel_:SetText(string.format(
+                        "Tower (%d,%d) | Dmg: %.1f | ASpd: %.2fs | Pwr: %.0f%% | [X] Sell: %d",
+                        gx, gz, dmg, fireInt, tower.ratio * 100, refund
+                    ))
+                    break
+                end
             end
         end
     elseif not inRange then

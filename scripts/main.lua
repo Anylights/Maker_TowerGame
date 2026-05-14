@@ -12,6 +12,7 @@ local Monster     = require("Monster")
 local Wave        = require("Wave")
 local Utils       = require("Utils")
 local GameUI      = require("GameUI")
+local Terrain     = require("Terrain")
 
 -- ============================================================================
 -- 生命周期
@@ -36,6 +37,9 @@ function Start()
     -- 能源塔
     EnergyTower.PlaceEnergyTower()
 
+    -- 场景物件
+    Terrain.Init()
+
     -- 悬停指示器
     Scene.CreateHoverIndicator()
 
@@ -56,12 +60,28 @@ end
 -- 主循环
 -- ============================================================================
 
+-- 速度档位
+local SPEED_LEVELS = { 1, 2, 4 }
+
 ---@param eventType string
 ---@param eventData UpdateEventData
 function HandleUpdate(eventType, eventData)
-    local dt = eventData["TimeStep"]:GetFloat()
+    local rawDt = eventData["TimeStep"]:GetFloat()
 
-    -- 相机（始终可操作）
+    -- Tab 切换游戏速度
+    if input:GetKeyPress(KEY_TAB) then
+        local cur = GS.gameSpeed
+        for idx, s in ipairs(SPEED_LEVELS) do
+            if s == cur then
+                GS.gameSpeed = SPEED_LEVELS[(idx % #SPEED_LEVELS) + 1]
+                break
+            end
+        end
+    end
+
+    local dt = rawDt * GS.gameSpeed
+
+    -- 相机（始终可操作，不受倍速影响）
     Scene.HandleCameraPan()
     Scene.HandleCameraZoom()
 
@@ -109,6 +129,9 @@ function HandleUpdate(eventType, eventData)
     -- 塔攻击 & 炮弹
     Tower.UpdateTowerAttacks(dt)
     Tower.UpdateProjectiles(dt)
+
+    -- 场景物件 (血条面向相机)
+    Terrain.Update(dt)
 
     -- 掉落物
     Utils.UpdateLoots(dt)

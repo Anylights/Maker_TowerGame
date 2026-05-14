@@ -118,6 +118,10 @@ M.BOSSES = {
         size = 0.80,
         color = Color(0.40, 0.27, 0.13, 1),
         emissive = Color(0.30, 0.15, 0.05),
+        -- 特殊: 每15s获得护甲buff持续8s
+        armorCycleInterval = 15.0,
+        armorBuffDuration = 8.0,
+        armorBuffValue = 0.50, -- +50% 护甲
     },
     line_devourer = {
         name = "吞线母体",
@@ -132,6 +136,11 @@ M.BOSSES = {
         size = 0.90,
         color = Color(0.40, 0.13, 0.67, 1),
         emissive = Color(0.30, 0.10, 0.50),
+        -- 特殊: 免疫能源线伤害, 每30s吸取30%功率持续5s
+        lineImmune = true,
+        drainInterval = 30.0,
+        drainDuration = 5.0,
+        drainRatio = 0.30, -- 吸取30%总功率
     },
 }
 
@@ -315,6 +324,7 @@ function M.SpawnMonster(monsterType, opts)
         speed = speed,
         dir = dir,
         armorRatio = armorRatio,
+        baseArmorRatio = armorRatio, -- 保存基础护甲 (Boss护甲buff需要)
         shield = shieldHp,
         maxShield = shieldHp,
         shieldNode = shieldNode,
@@ -335,6 +345,20 @@ function M.SpawnMonster(monsterType, opts)
         -- 特殊属性
         lineDmgReduction = typeDef.lineDmgReduction or 0,
         lineHealPerSec = lineHealPerSec,
+        lineImmune = typeDef.lineImmune or false,
+        -- Boss: 裂山巨像护甲周期
+        armorCycleTimer = 0,
+        armorBuffTimer = 0,
+        armorBuffValue = typeDef.armorBuffValue or 0,
+        armorCycleInterval = typeDef.armorCycleInterval or 0,
+        armorBuffDuration = typeDef.armorBuffDuration or 0,
+        -- Boss: 吞线母体功率吸取
+        drainTimer = 0,
+        drainActiveTimer = 0,
+        drainInterval = typeDef.drainInterval or 0,
+        drainDuration = typeDef.drainDuration or 0,
+        drainRatio = typeDef.drainRatio or 0,
+        drainActive = false,
     }
     table.insert(GS.monsters, monster)
 
@@ -410,6 +434,11 @@ function M.UpdateMonsters(dt)
                 end
             end
 
+            -- === Boss 特殊机制 ===
+            if m.isBoss then
+                M.UpdateBossMechanics(m, dt)
+            end
+
             -- 更新血条
             Utils.UpdateHealthBar(m)
 
@@ -420,6 +449,102 @@ function M.UpdateMonsters(dt)
                 table.remove(GS.monsters, i)
             else
                 i = i + 1
+            end
+        end
+    end
+end
+
+-- ============================================================================
+-- Boss 特殊机制
+-- ============================================================================
+
+--- 更新 Boss 专属机制 (每帧调用)
+function M.UpdateBossMechanics(m, dt)
+    -- === 裂山巨像: 周期护甲 buff ===
+    if m.armorCycleInterval > 0 then
+        if m.armorBuffTimer > 0 then
+            -- buff 激活中
+            m.armorBuffTimer = m.armorBuffTimer - dt
+            if m.armorBuffTimer <= 0 then
+                -- buff 结束，恢复基础护甲
+                m.armorRatio = m.baseArmorRatio
+                m.armorBuffTimer = 0
+                -- 恢复颜色
+                local model = m.node:GetComponent("StaticModel")
+                if model then
+                    local mat = model:GetMaterial(0)
+                    if mat then
+                        local typeDef = GetTypeDef(m.type)
+                        mat:SetShaderParameter("MatEmissiveColor", Variant(Color(
+                            typeDef.emissive.r, typeDef.emissive.g, typeDef.emissive.b)))
+                    end
+                end
+            end
+        else
+            -- 等待下次触发
+            m.armorCycleTimer = m.armorCycleTimer + dt
+            if m.armorCycleTimer >= m.armorCycleInterval then
+                m.armorCycleTimer = 0
+                m.armorBuffTimer = m.armorBuffDuration
+                -- 激活护甲 buff
+                m.armorRatio = math.min(0.9, m.baseArmorRatio + m.armorBuffValue)
+                -- 视觉: 发光变亮
+                local model = m.node:GetComponent("StaticModel")
+                if model then
+                    local mat = model:GetMaterial(0)
+                    if mat then
+                        mat:SetShaderParameter("MatEmissiveColor",
+                            Variant(Color(1.0, 0.6, 0.2)))
+                    end
+                end
+                print(string.format("[Boss] 裂山巨像 护甲强化! Armor: %.0f%% (%.0fs)",
+                    m.armorRatio * 100, m.armorBuffDuration))
+            end
+        end
+    end
+
+    -- === 吞线母体: 周期功率吸取 ===
+    if m.drainInterval > 0 then
+        if m.drainActive then
+            -- 吸取中
+            m.drainActiveTimer = m.drainActiveTimer - dt
+            if m.drainActiveTimer <= 0 then
+                -- 吸取结束
+                m.drainActive = false
+                m.drainActiveTimer = 0
+                -- 恢复颜色
+                local model = m.node:GetComponent("StaticModel")
+                if model then
+                    local mat = model:GetMaterial(0)
+                    if mat then
+                        local typeDef = GetTypeDef(m.type)
+                        mat:SetShaderParameter("MatEmissiveColor", Variant(Color(
+                            typeDef.emissive.r, typeDef.emissive.g, typeDef.emissive.b)))
+                    end
+                end
+                -- 恢复功率 (重新计算供能)
+                EnergyTower.RecalculateEnergy()
+                EnergyTower.RebuildEnergyLines()
+                print("[Boss] 吞线母体 功率吸取结束，供能恢复")
+            end
+        else
+            -- 等待下次触发
+            m.drainTimer = m.drainTimer + dt
+            if m.drainTimer >= m.drainInterval then
+                m.drainTimer = 0
+                m.drainActive = true
+                m.drainActiveTimer = m.drainDuration
+                -- 视觉: 紫色发光
+                local model = m.node:GetComponent("StaticModel")
+                if model then
+                    local mat = model:GetMaterial(0)
+                    if mat then
+                        mat:SetShaderParameter("MatEmissiveColor",
+                            Variant(Color(0.8, 0.2, 1.5)))
+                    end
+                end
+                print(string.format("[Boss] 吞线母体 功率吸取! 吸取 %.0f%% 功率 (%.0fs)",
+                    m.drainRatio * 100, m.drainDuration))
             end
         end
     end

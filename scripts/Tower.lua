@@ -7,6 +7,7 @@ local CONFIG = Cfg.CONFIG
 local GS = Cfg.GS
 local Utils = require("Utils")
 local EnergyTower = require("EnergyTower")
+local Terrain = require("Terrain")
 
 local M = {}
 
@@ -138,13 +139,48 @@ function M.UpdateTowerAttacks(dt)
             tower.targetYaw = math.deg(math.atan(dx, dz)) + 180
         end
 
-        -- 开火
+        -- 没有怪物目标时，寻找范围内的场景物件
+        ---@type table|nil
+        local bestTerrain = nil
+        if not bestM and GS.terrainObjects then
+            local bestTerrDist = CONFIG.TowerRange + 1
+            for _, tObj in ipairs(GS.terrainObjects) do
+                if tObj.node and tObj.hp > 0 then
+                    local dx = tObj.gx - tower.gx
+                    local dz = tObj.gz - tower.gz
+                    local d = math.sqrt(dx * dx + dz * dz)
+                    if d <= CONFIG.TowerRange and d < bestTerrDist then
+                        bestTerrDist = d
+                        bestTerrain = tObj
+                    end
+                end
+            end
+            -- 跟踪物件方向
+            if bestTerrain then
+                local dx = bestTerrain.gx - tower.gx
+                local dz = bestTerrain.gz - tower.gz
+                tower.targetYaw = math.deg(math.atan(dx, dz)) + 180
+            end
+        end
+
+        -- 开火 (攻速随功率比线性缩放, 最低 30%)
         tower.cooldown = tower.cooldown - dt
-        if tower.cooldown <= 0 and bestM then
+        if tower.cooldown <= 0 and (bestM or bestTerrain) then
             local att = EnergyTower.CalcAttenuation(tower.dist)
             local dmg = CONFIG.TowerBaseDmg * att
-            M.FireProjectile(tower, bestM, dmg)
-            tower.cooldown = CONFIG.TowerFireInterval
+            -- 邻接 buff: 水晶 power_bonus 增伤
+            local buffs = Terrain.GetAdjacentBuffs(tower.gx, tower.gz)
+            if buffs.power_bonus > 0 then
+                dmg = dmg * (1.0 + buffs.power_bonus)
+            end
+            if bestM then
+                M.FireProjectile(tower, bestM, dmg)
+            elseif bestTerrain then
+                M.FireProjectileAtTerrain(tower, bestTerrain, dmg)
+            end
+            -- 攻速: ratio 越高→interval 越短→攻速越快; 下限 30%
+            local speedMult = math.max(0.30, tower.ratio * #GS.towers)
+            tower.cooldown = CONFIG.TowerFireInterval / speedMult
         end
     end
 end
@@ -172,6 +208,25 @@ function M.FireProjectile(tower, targetMonster, dmg)
     table.insert(GS.projectiles, proj)
 end
 
+function M.FireProjectileAtTerrain(tower, terrainObj, dmg)
+    local node = GS.scene:CreateChild("Projectile")
+    local s = CONFIG.ProjectileSize / 0.28
+    node.scale = Vector3(s, s, s)
+    node.position = Vector3(tower.gx, 1.0, tower.gz)
+
+    local model = node:CreateComponent("StaticModel")
+    model:SetModel(cache:GetResource("Model", "Meshes/TD/weapon-ammo-cannonball.mdl"))
+    model:SetMaterial(cache:GetResource("Material", "Materials/TD/weapon-ammo-cannonball_00_colormap.xml"))
+
+    local proj = {
+        node = node,
+        terrainTarget = terrainObj,  -- 场景物件目标 (区别于 target 怪物)
+        speed = CONFIG.ProjectileSpeed,
+        damage = dmg,
+    }
+    table.insert(GS.projectiles, proj)
+end
+
 function M.UpdateProjectiles(dt)
     local Monster = require("Monster")
     local i = 1
@@ -179,6 +234,28 @@ function M.UpdateProjectiles(dt)
         local p = GS.projectiles[i]
         if not p.node then
             table.remove(GS.projectiles, i)
+        elseif p.terrainTarget then
+            -- 场景物件目标
+            local tt = p.terrainTarget
+            if not tt.node or tt.hp <= 0 then
+                p.node:Remove()
+                table.remove(GS.projectiles, i)
+            else
+                local pos = p.node.position
+                local tpos = tt.node.position
+                local dir = tpos - pos
+                local dist = dir:Length()
+                if dist < 0.4 then
+                    Terrain.DamageObject(tt, p.damage)
+                    p.node:Remove()
+                    table.remove(GS.projectiles, i)
+                else
+                    dir = dir / dist
+                    pos = pos + dir * p.speed * dt
+                    p.node.position = pos
+                    i = i + 1
+                end
+            end
         elseif not p.target or not p.target.node or p.target.hp <= 0 then
             p.node:Remove()
             table.remove(GS.projectiles, i)
@@ -304,6 +381,10 @@ function M.HandleGridHover()
             isOccupied = true
             break
         end
+    end
+    -- 场景物件也阻挡建塔
+    if not isOccupied and Terrain.GetObjectAt(gx, gz) then
+        isOccupied = true
     end
     local canAfford = GS.gold >= M.GetTowerCost()
 

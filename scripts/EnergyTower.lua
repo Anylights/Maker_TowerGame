@@ -245,7 +245,18 @@ function M.RecalculateEnergy()
     local N = #GS.towers
     if N == 0 then return end
     local totalPower = M.GetTotalPower()
-    local pShare = totalPower / N
+
+    -- 吞线母体功率吸取: 检查是否有 Boss 正在吸取
+    local drainMult = 1.0
+    for _, m in ipairs(GS.monsters) do
+        if m.drainActive and m.drainRatio > 0 then
+            drainMult = drainMult - m.drainRatio
+        end
+    end
+    drainMult = math.max(0.1, drainMult) -- 最低保留 10%
+    local effectivePower = totalPower * drainMult
+
+    local pShare = effectivePower / N
     for _, t in ipairs(GS.towers) do
         local att = M.CalcAttenuation(t.dist)
         t.delivered = pShare * att
@@ -392,6 +403,11 @@ function M.UpdateLineDamage(dt)
 
     for _, m in ipairs(GS.monsters) do
         if m.node and m.hp > 0 then
+            -- 吞线母体: 完全免疫能源线伤害
+            if m.lineImmune then
+                goto continue_monster
+            end
+
             local mx = m.node.position.x
             local mz = m.node.position.z
 
@@ -431,6 +447,8 @@ function M.UpdateLineDamage(dt)
                     Monster.DamageMonster(m, math.floor(dmg + 0.5), true)
                 end
             end
+
+            ::continue_monster::
         end
     end
 end
