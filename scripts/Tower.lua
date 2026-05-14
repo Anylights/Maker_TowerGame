@@ -29,6 +29,14 @@ function M.GetTowerCost()
     return CONFIG.BaseCost + CONFIG.CostLinear * n + CONFIG.CostQuad * n * n
 end
 
+--- 计算指定塔的建造成本 (根据它是第几座塔时的造价)
+--- @param towerIndex number 塔在 GS.towers 中的索引 (1-based)
+function M.GetTowerOriginalCost(towerIndex)
+    -- 建造第 n 座塔的成本 = BaseCost + CostLinear*(n-1) + CostQuad*(n-1)^2
+    local n = towerIndex - 1
+    return CONFIG.BaseCost + CONFIG.CostLinear * n + CONFIG.CostQuad * n * n
+end
+
 -- ============================================================================
 -- 创建塔模型
 -- ============================================================================
@@ -194,6 +202,61 @@ function M.UpdateProjectiles(dt)
 end
 
 -- ============================================================================
+-- 塔拆除
+-- ============================================================================
+
+--- 拆除指定塔并返还资源
+--- @param towerIndex number 塔在 GS.towers 中的索引 (1-based)
+--- @return boolean 是否拆除成功
+function M.DemolishTower(towerIndex)
+    if towerIndex < 1 or towerIndex > #GS.towers then return false end
+    local tower = GS.towers[towerIndex]
+
+    -- 返还比例: 准备阶段 70%, 战斗阶段 40%
+    local ratio = 0.4
+    if GS.wavePhase == "preparing" then
+        ratio = 0.7
+    end
+
+    -- 返还金币 (基于该塔的造价)
+    local originalCost = M.GetTowerOriginalCost(towerIndex)
+    local refund = math.floor(originalCost * ratio + 0.5)
+    GS.gold = GS.gold + refund
+
+    -- 移除节点
+    if tower.node then
+        tower.node:Remove()
+    end
+
+    -- 清除对该塔的炮弹引用 (避免悬挂引用)
+    for _, p in ipairs(GS.projectiles) do
+        -- 炮弹无需特殊处理，target 是怪物不是塔
+    end
+
+    table.remove(GS.towers, towerIndex)
+
+    -- 重新计算供能和线段
+    EnergyTower.RecalculateEnergy()
+    EnergyTower.RebuildEnergyLines()
+
+    print(string.format("[Tower] Demolished tower at (%d,%d) | Refund: %d gold (%.0f%%)",
+        tower.gx, tower.gz, refund, ratio * 100))
+
+    return true
+end
+
+--- 查找悬停位置的塔索引
+--- @return number|nil 塔索引(1-based) 或 nil
+function M.GetTowerAtHover()
+    for idx, tower in ipairs(GS.towers) do
+        if tower.gx == GS.hoverGX and tower.gz == GS.hoverGZ then
+            return idx
+        end
+    end
+    return nil
+end
+
+-- ============================================================================
 -- 悬停 + 放置输入
 -- ============================================================================
 
@@ -262,6 +325,14 @@ end
 function M.HandlePlacement()
     if input:GetMouseButtonPress(MOUSEB_LEFT) and GS.hoverOnMap and GS.hoverValid then
         M.PlaceBasicTower(GS.hoverGX, GS.hoverGZ)
+    end
+
+    -- X 键拆除悬停处的塔
+    if input:GetKeyPress(KEY_X) and GS.hoverOnMap then
+        local idx = M.GetTowerAtHover()
+        if idx then
+            M.DemolishTower(idx)
+        end
     end
 end
 

@@ -405,6 +405,12 @@ function M.UpdateLineDamage(dt)
             end
 
             if #hitPowers > 0 then
+                -- 吸能词缀: 怪物在能源线上持续回血
+                if m.lineHealPerSec and m.lineHealPerSec > 0 then
+                    local heal = m.lineHealPerSec * dt
+                    m.hp = math.min(m.hp + heal, m.maxHp)
+                end
+
                 -- 按功率降序，高功率线先享受 100% 系数
                 table.sort(hitPowers, function(a, b) return a > b end)
 
@@ -414,9 +420,15 @@ function M.UpdateLineDamage(dt)
                     totalDps = totalDps + pwr * dmgCoeff * convEff * decay
                 end
 
+                -- 吞能者: 降低线伤 (lineDmgReduction = 0.4 表示减少 40%)
+                if m.lineDmgReduction and m.lineDmgReduction > 0 then
+                    totalDps = totalDps * (1.0 - m.lineDmgReduction)
+                end
+
                 local dmg = totalDps * dt
                 if dmg >= 0.5 then
-                    Monster.DamageMonster(m, math.floor(dmg + 0.5))
+                    -- isEnergyDmg=true: 能量线伤害绕过护甲
+                    Monster.DamageMonster(m, math.floor(dmg + 0.5), true)
                 end
             end
         end

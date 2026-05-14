@@ -17,6 +17,8 @@ local costLabel_ = nil
 local statsLabel_ = nil
 local hintLabel_ = nil
 local waveLabel_ = nil
+local powerLabel_ = nil
+local previewLabel_ = nil
 
 -- 升级面板
 local upgradePanel_ = nil
@@ -75,6 +77,16 @@ function M.CreateGameUI()
         text = "",
         fontSize = 14,
         fontColor = { 255, 220, 140, 240 },
+    }
+    previewLabel_ = UI.Label {
+        text = "",
+        fontSize = 11,
+        fontColor = { 200, 200, 180, 180 },
+    }
+    powerLabel_ = UI.Label {
+        text = "",
+        fontSize = 12,
+        fontColor = { 140, 200, 255, 220 },
     }
     hintLabel_ = UI.Label {
         text = "Left Click: Build Tower | Middle Drag: Pan | Scroll: Zoom",
@@ -154,19 +166,19 @@ function M.CreateGameUI()
                         borderRadius = 6, paddingX = 12, paddingY = 8,
                         children = { goldLabel_, materialLabel_, energyLabel_, costLabel_ }
                     },
-                    -- 中：波次信息
+                    -- 中：波次信息 + 下一波预告
                     UI.Panel {
-                        flexDirection = "column", gap = 4,
+                        flexDirection = "column", gap = 3,
                         backgroundColor = { 0, 0, 0, 140 },
                         borderRadius = 6, paddingX = 12, paddingY = 8,
-                        children = { waveLabel_ }
+                        children = { waveLabel_, previewLabel_ }
                     },
-                    -- 右：能源统计
+                    -- 右：能源统计 + 功率守恒
                     UI.Panel {
-                        flexDirection = "column", gap = 4,
+                        flexDirection = "column", gap = 3,
                         backgroundColor = { 0, 0, 0, 140 },
                         borderRadius = 6, paddingX = 12, paddingY = 8,
-                        children = { statsLabel_ }
+                        children = { statsLabel_, powerLabel_ }
                     },
                 }
             },
@@ -225,14 +237,14 @@ end
 
 function M.ShowUpgradePanel()
     if not upgradePanel_ then return end
-    upgradePanel_:SetStyle("display", "flex")
+    upgradePanel_:SetStyle({ display = "flex" })
     upgradePanelVisible_ = true
     M.RefreshUpgradePanel()
 end
 
 function M.HideUpgradePanel()
     if not upgradePanel_ then return end
-    upgradePanel_:SetStyle("display", "none")
+    upgradePanel_:SetStyle({ display = "none" })
     upgradePanelVisible_ = false
 end
 
@@ -266,8 +278,8 @@ function M.RefreshUI()
     end
 
     -- 能源统计 + 等级
+    local EnergyTower = require("EnergyTower")
     if statsLabel_ then
-        local EnergyTower = require("EnergyTower")
         local n = #GS.towers
         local nm = #GS.monsters
         if n == 0 then
@@ -276,13 +288,32 @@ function M.RefreshUI()
                 GS.etLevel, GS.etHP, GS.etMaxHP, nm
             ))
         else
-            local totalDel = 0
-            for _, t in ipairs(GS.towers) do
-                totalDel = totalDel + t.delivered
-            end
             statsLabel_:SetText(string.format(
-                "Lv.%d | HP: %d/%d | T: %d | M: %d | Pwr: %.0f",
-                GS.etLevel, GS.etHP, GS.etMaxHP, n, nm, totalDel
+                "Lv.%d | HP: %d/%d | T: %d | M: %d",
+                GS.etLevel, GS.etHP, GS.etMaxHP, n, nm
+            ))
+        end
+    end
+
+    -- 功率守恒 HUD
+    if powerLabel_ then
+        local n = #GS.towers
+        if n == 0 then
+            local totalP = EnergyTower.GetTotalPower()
+            powerLabel_:SetText(string.format("P_total: %d | Idle", totalP))
+        else
+            local totalP = EnergyTower.GetTotalPower()
+            local sumDel = 0
+            local sumLine = 0
+            for _, t in ipairs(GS.towers) do
+                sumDel = sumDel + t.delivered
+                sumLine = sumLine + t.linePwr
+            end
+            local convEff = EnergyTower.GetConvEff()
+            local lineDps = sumLine * CONFIG.LineDmgCoeff * convEff
+            powerLabel_:SetText(string.format(
+                "P: %d = Del %.0f + Line %.0f | DPS: %.1f",
+                totalP, sumDel, sumLine, lineDps
             ))
         end
     end
@@ -290,6 +321,16 @@ function M.RefreshUI()
     -- 波次信息
     if waveLabel_ then
         waveLabel_:SetText(Wave.GetWaveInfo())
+    end
+
+    -- 下一波预告
+    if previewLabel_ then
+        local preview = Wave.GetNextWavePreview()
+        if preview then
+            previewLabel_:SetText(string.format("Next: %s (%d)", preview.summary, preview.totalMonsters))
+        else
+            previewLabel_:SetText("")
+        end
     end
 
     -- 升级面板实时刷新（如果可见）
@@ -312,7 +353,7 @@ function M.UpdateHintLabel()
     local EnergyTower = require("EnergyTower")
 
     if not GS.hoverOnMap then
-        hintLabel_:SetText("Left Click: Build Tower | Middle Drag: Pan | Scroll: Zoom")
+        hintLabel_:SetText("LClick: Build | X: Sell | U: Upgrade | MMB: Pan | Scroll: Zoom | Space: Skip")
         if upgradePanelVisible_ then
             M.HideUpgradePanel()
         end
@@ -353,13 +394,17 @@ function M.UpdateHintLabel()
         end
     elseif isOccupied then
         if upgradePanelVisible_ then M.HideUpgradePanel() end
-        for _, tower in ipairs(GS.towers) do
+        for idx, tower in ipairs(GS.towers) do
             if tower.gx == gx and tower.gz == gz then
                 local att = EnergyTower.CalcAttenuation(tower.dist)
                 local dmg = CONFIG.TowerBaseDmg * att
+                -- 拆除返还信息
+                local ratio = GS.wavePhase == "preparing" and 0.7 or 0.4
+                local origCost = Tower.GetTowerOriginalCost(idx)
+                local refund = math.floor(origCost * ratio + 0.5)
                 hintLabel_:SetText(string.format(
-                    "Tower (%d,%d) | Dist: %.1f | Attn: %.0f%% | Dmg: %.1f | Power: %.0f%%",
-                    gx, gz, tower.dist, att * 100, dmg, tower.ratio * 100
+                    "Tower (%d,%d) | Dmg: %.1f | Pwr: %.0f%% | [X] Sell: %d (%.0f%%)",
+                    gx, gz, dmg, tower.ratio * 100, refund, ratio * 100
                 ))
                 break
             end
@@ -374,9 +419,34 @@ function M.UpdateHintLabel()
         if upgradePanelVisible_ then M.HideUpgradePanel() end
         local att = EnergyTower.CalcAttenuation(dist)
         local dmg = CONFIG.TowerBaseDmg * att
+        -- 建造预览: 预测新塔的供能%和线伤变化
+        local n = #GS.towers
+        local totalP = EnergyTower.GetTotalPower()
+        local newN = n + 1
+        local newShare = totalP / newN
+        local newDel = newShare * att
+        local newRatio = newDel / totalP
+        local newLinePwr = newShare - newDel
+        -- 预测总线功率
+        local curLinePwrSum = 0
+        for _, t in ipairs(GS.towers) do
+            curLinePwrSum = curLinePwrSum + t.linePwr
+        end
+        local convEff = EnergyTower.GetConvEff()
+        local curLineDps = curLinePwrSum * CONFIG.LineDmgCoeff * convEff
+        -- 新塔后：每座塔都会重新分配功率
+        local newTotalLine = 0
+        for _, t in ipairs(GS.towers) do
+            local tAtt = EnergyTower.CalcAttenuation(t.dist)
+            local tDel = newShare * tAtt
+            newTotalLine = newTotalLine + (newShare - tDel)
+        end
+        newTotalLine = newTotalLine + newLinePwr
+        local newLineDps = newTotalLine * CONFIG.LineDmgCoeff * convEff
+        local dpsDelta = newLineDps - curLineDps
         hintLabel_:SetText(string.format(
-            "Click to build | Cost: %d | Dist: %.1f | Attn: %.0f%% | Dmg: %.1f",
-            Tower.GetTowerCost(), dist, att * 100, dmg
+            "Build | Cost: %d | Pwr: %.0f%% | Dmg: %.1f | LineDPS: %+.1f",
+            Tower.GetTowerCost(), newRatio * 100, dmg, dpsDelta
         ))
     end
 end
