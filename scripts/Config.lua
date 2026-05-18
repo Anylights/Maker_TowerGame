@@ -194,11 +194,16 @@ M.GS = {
 
     -- 波次状态
     currentWave = 0,
-    wavePhase = "preparing", -- "preparing" | "spawning" | "clearing" | "complete"
+    wavePhase = "preparing", -- "preparing" | "spawning" | "clearing" | "dropping" | "complete"
     waveTimer = 0,
     waveSpawnIndex = 0,
     waveSpawnTimer = 0,
     monstersKilled = 0,
+
+    -- 圣器系统
+    artifactInventory = {},       -- 背包: { {id, def, equipped, towerIndex, slotType}, ... }
+    artifactDropPending = false,  -- 是否有待处理的掉落选择
+    artifactDropCandidates = nil, -- 3选1 候选列表
 }
 
 return M

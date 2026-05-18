@@ -6,6 +6,7 @@ local Cfg = require("Config")
 local CONFIG = Cfg.CONFIG
 local GS = Cfg.GS
 local Monster = require("Monster")
+local Artifact = require("Artifact")
 
 local M = {}
 
@@ -370,8 +371,24 @@ function M.Update(dt)
                 GS.wavePhase = "victory"
                 print("[Wave] All waves cleared! Victory!")
             else
-                M.StartWave()
+                -- 触发圣器掉落 3选1
+                Artifact.TriggerWaveDrop()
+                if GS.artifactDropPending then
+                    GS.wavePhase = "dropping"
+                    print("[Wave] Entering artifact drop selection...")
+                else
+                    M.StartWave()
+                end
             end
+        end
+        return
+    end
+
+    -- === 圣器掉落选择阶段 (等待玩家选择，由 UI 调用 Artifact.PickDrop) ===
+    if GS.wavePhase == "dropping" then
+        if not GS.artifactDropPending then
+            -- 玩家已选择，进入下一波
+            M.StartWave()
         end
         return
     end

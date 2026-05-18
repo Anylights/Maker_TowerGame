@@ -7,6 +7,7 @@ local CONFIG = Cfg.CONFIG
 local GS = Cfg.GS
 local Utils = require("Utils")
 local EnergyTower = require("EnergyTower")
+local StatusEffect = require("StatusEffect")
 
 local M = {}
 
@@ -360,6 +361,8 @@ function M.SpawnMonster(monsterType, opts)
         drainRatio = typeDef.drainRatio or 0,
         drainActive = false,
     }
+    -- 初始化状态效果容器
+    StatusEffect.InitMonsterEffects(monster)
     table.insert(GS.monsters, monster)
 
     -- 日志
@@ -382,7 +385,7 @@ function M.UpdateMonsters(dt)
             table.remove(GS.monsters, i)
         else
             local pos = m.node.position
-            local speed = m.speed
+            local speed = StatusEffect.GetEffectiveSpeed(m)
             local reachedEnd = false
 
             if m.path and #m.path >= 2 then
@@ -613,9 +616,10 @@ function M.KillMonster(m)
 end
 
 function M.DestroyMonster(m)
-    if m.shieldNode then m.shieldNode:Remove() end
-    if m.hpBg then m.hpBg:Remove() end
-    if m.node then m.node:Remove() end
+    if m.shieldNode then m.shieldNode:Remove(); m.shieldNode = nil end
+    if m.hpBg then m.hpBg:Remove(); m.hpBg = nil end
+    if m.node then m.node:Remove(); m.node = nil end
+    m.hp = 0
 end
 
 return M

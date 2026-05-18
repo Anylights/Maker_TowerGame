@@ -7,7 +7,8 @@ local CONFIG = Cfg.CONFIG
 local GS = Cfg.GS
 local Utils = require("Utils")
 local EnergyTower = require("EnergyTower")
-local Terrain = require("Terrain")
+local Artifact = require("Artifact")
+local StatusEffect = require("StatusEffect")
 
 local M = {}
 
@@ -49,7 +50,7 @@ local function CreateTowerModel(node)
     baseModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-square-bottom-a_00_colormap.xml"))
     baseModel.castShadows = true
 
-    local weaponName = WEAPON_MODELS[math.random(1, #WEAPON_MODELS)]
+    local weaponName = "weapon-ballista"  -- 统一使用弩炮模型
     local weaponChild = node:CreateChild("TowerWeapon")
     weaponChild.position = Vector3(0, 0.5, 0)
     local weaponModel = weaponChild:CreateComponent("StaticModel")
@@ -84,6 +85,8 @@ function M.PlaceBasicTower(gx, gz)
         weaponYaw = 0,
         targetYaw = nil,
     }
+    -- 初始化圣器槽位
+    Artifact.InitTowerSlots(tower)
     table.insert(GS.towers, tower)
 
     EnergyTower.RecalculateEnergy()
@@ -139,48 +142,24 @@ function M.UpdateTowerAttacks(dt)
             tower.targetYaw = math.deg(math.atan(dx, dz)) + 180
         end
 
-        -- 没有怪物目标时，寻找范围内的场景物件
-        ---@type table|nil
-        local bestTerrain = nil
-        if not bestM and GS.terrainObjects then
-            local bestTerrDist = CONFIG.TowerRange + 1
-            for _, tObj in ipairs(GS.terrainObjects) do
-                if tObj.node and tObj.hp > 0 then
-                    local dx = tObj.gx - tower.gx
-                    local dz = tObj.gz - tower.gz
-                    local d = math.sqrt(dx * dx + dz * dz)
-                    if d <= CONFIG.TowerRange and d < bestTerrDist then
-                        bestTerrDist = d
-                        bestTerrain = tObj
-                    end
-                end
-            end
-            -- 跟踪物件方向
-            if bestTerrain then
-                local dx = bestTerrain.gx - tower.gx
-                local dz = bestTerrain.gz - tower.gz
-                tower.targetYaw = math.deg(math.atan(dx, dz)) + 180
-            end
-        end
-
         -- 开火 (攻速随功率比线性缩放, 最低 30%)
         tower.cooldown = tower.cooldown - dt
-        if tower.cooldown <= 0 and (bestM or bestTerrain) then
+        if tower.cooldown <= 0 and bestM then
             local att = EnergyTower.CalcAttenuation(tower.dist)
             local dmg = CONFIG.TowerBaseDmg * att
-            -- 邻接 buff: 水晶 power_bonus 增伤
-            local buffs = Terrain.GetAdjacentBuffs(tower.gx, tower.gz)
-            if buffs.power_bonus > 0 then
-                dmg = dmg * (1.0 + buffs.power_bonus)
-            end
-            if bestM then
+            -- 圣器伤害乘数
+            dmg = dmg * (tower.artDmgMult or 1.0)
+            -- 圣器弹道形态: area → AOE 爆炸弹
+            if tower.artBulletForm == "area" and tower.artAreaRadius > 0 then
+                M.FireAreaProjectile(tower, bestM, dmg, tower.artAreaRadius)
+            else
                 M.FireProjectile(tower, bestM, dmg)
-            elseif bestTerrain then
-                M.FireProjectileAtTerrain(tower, bestTerrain, dmg)
             end
             -- 攻速: ratio 越高→interval 越短→攻速越快; 下限 30%
             local speedMult = math.max(0.30, tower.ratio * #GS.towers)
-            tower.cooldown = CONFIG.TowerFireInterval / speedMult
+            -- 圣器攻速乘数
+            speedMult = speedMult * (tower.artAtkSpdMult or 1.0)
+            tower.cooldown = CONFIG.TowerFireInterval / math.max(0.10, speedMult)
         end
     end
 end
@@ -204,25 +183,37 @@ function M.FireProjectile(tower, targetMonster, dmg)
         target = targetMonster,
         speed = CONFIG.ProjectileSpeed,
         damage = dmg,
+        sourceTower = tower,  -- 圣器命中效果需要
     }
     table.insert(GS.projectiles, proj)
 end
 
-function M.FireProjectileAtTerrain(tower, terrainObj, dmg)
+--- AOE 范围爆炸弹 (高爆圣器)
+function M.FireAreaProjectile(tower, targetMonster, dmg, radius)
     local node = GS.scene:CreateChild("Projectile")
-    local s = CONFIG.ProjectileSize / 0.28
+    local s = CONFIG.ProjectileSize / 0.28 * 1.4 -- 稍大
     node.scale = Vector3(s, s, s)
     node.position = Vector3(tower.gx, 1.0, tower.gz)
 
     local model = node:CreateComponent("StaticModel")
     model:SetModel(cache:GetResource("Model", "Meshes/TD/weapon-ammo-cannonball.mdl"))
-    model:SetMaterial(cache:GetResource("Material", "Materials/TD/weapon-ammo-cannonball_00_colormap.xml"))
+    -- 使用红色发光材质区分 AOE
+    local mat = Material:new()
+    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+    mat:SetShaderParameter("MatDiffColor", Variant(Color(0.9, 0.3, 0.1, 1)))
+    mat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.8, 0.2, 0.05)))
+    mat:SetShaderParameter("Metallic", Variant(0.0))
+    mat:SetShaderParameter("Roughness", Variant(0.5))
+    model:SetMaterial(mat)
 
     local proj = {
         node = node,
-        terrainTarget = terrainObj,  -- 场景物件目标 (区别于 target 怪物)
-        speed = CONFIG.ProjectileSpeed,
+        target = targetMonster,
+        speed = CONFIG.ProjectileSpeed * 0.8,  -- 稍慢
         damage = dmg,
+        sourceTower = tower,
+        isArea = true,
+        areaRadius = radius,
     }
     table.insert(GS.projectiles, proj)
 end
@@ -234,28 +225,6 @@ function M.UpdateProjectiles(dt)
         local p = GS.projectiles[i]
         if not p.node then
             table.remove(GS.projectiles, i)
-        elseif p.terrainTarget then
-            -- 场景物件目标
-            local tt = p.terrainTarget
-            if not tt.node or tt.hp <= 0 then
-                p.node:Remove()
-                table.remove(GS.projectiles, i)
-            else
-                local pos = p.node.position
-                local tpos = tt.node.position
-                local dir = tpos - pos
-                local dist = dir:Length()
-                if dist < 0.4 then
-                    Terrain.DamageObject(tt, p.damage)
-                    p.node:Remove()
-                    table.remove(GS.projectiles, i)
-                else
-                    dir = dir / dist
-                    pos = pos + dir * p.speed * dt
-                    p.node.position = pos
-                    i = i + 1
-                end
-            end
         elseif not p.target or not p.target.node or p.target.hp <= 0 then
             p.node:Remove()
             table.remove(GS.projectiles, i)
@@ -265,7 +234,31 @@ function M.UpdateProjectiles(dt)
             local dir = tpos - pos
             local dist = dir:Length()
             if dist < 0.3 then
-                Monster.DamageMonster(p.target, p.damage)
+                if p.isArea and p.areaRadius and p.areaRadius > 0 then
+                    -- AOE 爆炸: 伤害范围内所有怪物
+                    local hitPos = p.target.node.position
+                    for _, m in ipairs(GS.monsters) do
+                        if m.node and m.hp > 0 then
+                            local dx = m.node.position.x - hitPos.x
+                            local dz = m.node.position.z - hitPos.z
+                            local d = math.sqrt(dx * dx + dz * dz)
+                            if d <= p.areaRadius then
+                                Monster.DamageMonster(m, p.damage)
+                                -- 圣器命中效果
+                                if p.sourceTower then
+                                    StatusEffect.ProcessOnHitEffects(m, p.damage, p.sourceTower)
+                                end
+                            end
+                        end
+                    end
+                else
+                    -- 单体命中
+                    Monster.DamageMonster(p.target, p.damage)
+                    -- 圣器命中效果
+                    if p.sourceTower then
+                        StatusEffect.ProcessOnHitEffects(p.target, p.damage, p.sourceTower)
+                    end
+                end
                 p.node:Remove()
                 table.remove(GS.projectiles, i)
             else
@@ -300,17 +293,31 @@ function M.DemolishTower(towerIndex)
     local refund = math.floor(originalCost * ratio + 0.5)
     GS.gold = GS.gold + refund
 
+    -- 卸下该塔上的圣器 (归还背包)
+    if tower.mainSlot then
+        Artifact.UnequipFromTower(tower.mainSlot)
+    end
+    if tower.subSlot then
+        Artifact.UnequipFromTower(tower.subSlot)
+    end
+
     -- 移除节点
     if tower.node then
         tower.node:Remove()
     end
 
-    -- 清除对该塔的炮弹引用 (避免悬挂引用)
-    for _, p in ipairs(GS.projectiles) do
-        -- 炮弹无需特殊处理，target 是怪物不是塔
-    end
-
+    -- 拆除后需要更新所有背包中指向后续塔的 towerIndex
+    -- (因为 table.remove 会导致后续塔索引前移)
     table.remove(GS.towers, towerIndex)
+
+    -- 修正背包中的 towerIndex 引用
+    for _, entry in ipairs(GS.artifactInventory) do
+        if entry.equipped and entry.towerIndex then
+            if entry.towerIndex > towerIndex then
+                entry.towerIndex = entry.towerIndex - 1
+            end
+        end
+    end
 
     -- 重新计算供能和线段
     EnergyTower.RecalculateEnergy()
@@ -382,10 +389,6 @@ function M.HandleGridHover()
             break
         end
     end
-    -- 场景物件也阻挡建塔
-    if not isOccupied and Terrain.GetObjectAt(gx, gz) then
-        isOccupied = true
-    end
     local canAfford = GS.gold >= M.GetTowerCost()
 
     GS.hoverValid = inRange and not isEnergyTower and not isOccupied and canAfford
@@ -404,8 +407,20 @@ function M.HandleGridHover()
 end
 
 function M.HandlePlacement()
-    if input:GetMouseButtonPress(MOUSEB_LEFT) and GS.hoverOnMap and GS.hoverValid then
-        M.PlaceBasicTower(GS.hoverGX, GS.hoverGZ)
+    local GameUI = require("GameUI")
+
+    if input:GetMouseButtonPress(MOUSEB_LEFT) and GS.hoverOnMap then
+        -- 如果鼠标在 UI 面板上，不做任何操作（防止穿透建塔）
+        if GameUI.IsMouseOverUIPanel() then
+            return
+        end
+
+        if GS.hoverValid then
+            -- 点击空地建塔，关闭详情面板
+            GameUI.HideTowerDetail()
+            M.PlaceBasicTower(GS.hoverGX, GS.hoverGZ)
+        end
+        -- 塔详情 open/toggle/switch 由 GameUI.HandleArtifactInput 统一处理
     end
 
     -- X 键拆除悬停处的塔
