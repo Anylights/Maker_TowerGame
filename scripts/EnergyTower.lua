@@ -123,73 +123,234 @@ function M.PlaceEnergyTower()
     local sc = 1.6
     node.scale = Vector3(sc, sc, sc)
 
-    -- 底座
+    -- ================================================================
+    -- 底座平台（方形底座 → 比圆塔身更宽，打造稳重感）
+    -- ================================================================
+    local platformChild = node:CreateChild("ETPlatform")
+    platformChild.scale = Vector3(1.15, 1.0, 1.15)
+    local platformModel = platformChild:CreateComponent("StaticModel")
+    platformModel:SetModel(cache:GetResource("Model", "Meshes/TD/tower-square-bottom-a.mdl"))
+    platformModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-square-bottom-a_00_colormap.xml"))
+    platformModel.castShadows = true
+
+    -- ================================================================
+    -- 圆形底座（在方形平台上方）
+    -- ================================================================
     local baseChild = node:CreateChild("ETBase")
+    baseChild.position = Vector3(0, 0.18, 0)
     local baseModel = baseChild:CreateComponent("StaticModel")
     baseModel:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-base.mdl"))
     baseModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-base_00_colormap.xml"))
     baseModel.castShadows = true
 
-    -- 塔身第1层
+    -- ================================================================
+    -- 塔身：3 层递进缩小，越高越细
+    -- ================================================================
+    local bodyY = 0.39  -- base top = 0.18 + 0.21
+
+    -- 第 1 层（最宽）
     local bodyChild1 = node:CreateChild("ETBody1")
-    bodyChild1.position = Vector3(0, 0.21, 0)
+    bodyChild1.position = Vector3(0, bodyY, 0)
+    bodyChild1.scale = Vector3(1.0, 1.0, 1.0)
     local bodyModel1 = bodyChild1:CreateComponent("StaticModel")
     bodyModel1:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-top-a.mdl"))
     bodyModel1:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-top-a_00_colormap.xml"))
     bodyModel1.castShadows = true
 
-    -- 塔身第2层
+    -- 第 2 层（略窄）
     local bodyChild2 = node:CreateChild("ETBody2")
-    bodyChild2.position = Vector3(0, 0.71, 0)
+    bodyChild2.position = Vector3(0, bodyY + 0.50, 0)
+    bodyChild2.scale = Vector3(0.88, 1.0, 0.88)
     local bodyModel2 = bodyChild2:CreateComponent("StaticModel")
     bodyModel2:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-top-a.mdl"))
     bodyModel2:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-top-a_00_colormap.xml"))
     bodyModel2.castShadows = true
 
-    -- 水晶
+    -- 第 3 层（最窄）
+    local bodyChild3 = node:CreateChild("ETBody3")
+    bodyChild3.position = Vector3(0, bodyY + 1.00, 0)
+    bodyChild3.scale = Vector3(0.75, 0.90, 0.75)
+    local bodyModel3 = bodyChild3:CreateComponent("StaticModel")
+    bodyModel3:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-top-a.mdl"))
+    bodyModel3:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-top-a_00_colormap.xml"))
+    bodyModel3.castShadows = true
+
+    -- ================================================================
+    -- 旋转能量环（3 个不同高度、速度、倾角的 Torus）
+    -- ================================================================
+    local ringMat = Material:new()
+    ringMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+    ringMat:SetShaderParameter("MatDiffColor", Variant(Color(0.3, 0.85, 1.0, 0.55)))
+    ringMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 1.6, 2.2)))
+    ringMat:SetShaderParameter("Metallic", Variant(0.8))
+    ringMat:SetShaderParameter("Roughness", Variant(0.15))
+
+    GS.etRingNodes = {}
+
+    -- 环 1：底部，最大，水平慢转
+    local ring1 = node:CreateChild("ETRing1")
+    ring1.position = Vector3(0, bodyY + 0.25, 0)
+    ring1.scale = Vector3(0.95, 0.8, 0.95)
+    local ring1Model = ring1:CreateComponent("StaticModel")
+    ring1Model:SetModel(cache:GetResource("Model", "Models/Torus.mdl"))
+    ring1Model:SetMaterial(ringMat)
+    GS.etRingNodes[1] = ring1
+
+    -- 环 2：中部，略小，倾斜反转
+    local ringMat2 = ringMat:Clone()
+    ringMat2:SetShaderParameter("MatDiffColor", Variant(Color(0.5, 0.7, 1.0, 0.45)))
+    ringMat2:SetShaderParameter("MatEmissiveColor", Variant(Color(0.9, 1.2, 2.5)))
+
+    local ring2 = node:CreateChild("ETRing2")
+    ring2.position = Vector3(0, bodyY + 0.75, 0)
+    ring2.scale = Vector3(0.78, 0.7, 0.78)
+    ring2.rotation = Quaternion(15, Vector3.FORWARD)  -- 略微倾斜
+    local ring2Model = ring2:CreateComponent("StaticModel")
+    ring2Model:SetModel(cache:GetResource("Model", "Models/Torus.mdl"))
+    ring2Model:SetMaterial(ringMat2)
+    GS.etRingNodes[2] = ring2
+
+    -- 环 3：顶部，最小，反向倾斜快转
+    local ringMat3 = ringMat:Clone()
+    ringMat3:SetShaderParameter("MatDiffColor", Variant(Color(0.7, 0.9, 1.0, 0.5)))
+    ringMat3:SetShaderParameter("MatEmissiveColor", Variant(Color(1.5, 1.8, 2.8)))
+
+    local ring3 = node:CreateChild("ETRing3")
+    ring3.position = Vector3(0, bodyY + 1.25, 0)
+    ring3.scale = Vector3(0.62, 0.6, 0.62)
+    ring3.rotation = Quaternion(-12, Vector3.RIGHT)  -- 反向倾斜
+    local ring3Model = ring3:CreateComponent("StaticModel")
+    ring3Model:SetModel(cache:GetResource("Model", "Models/Torus.mdl"))
+    ring3Model:SetMaterial(ringMat3)
+    GS.etRingNodes[3] = ring3
+
+    -- ================================================================
+    -- 顶部水晶冠（会旋转）
+    -- ================================================================
     local crystalChild = node:CreateChild("ETCrystals")
-    crystalChild.position = Vector3(0, 1.21, 0)
+    crystalChild.position = Vector3(0, bodyY + 1.45, 0)
+    crystalChild.scale = Vector3(0.85, 0.85, 0.85)
     local crystalModel = crystalChild:CreateComponent("StaticModel")
     crystalModel:SetModel(cache:GetResource("Model", "Meshes/TD/tower-round-crystals.mdl"))
     crystalModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tower-round-crystals_00_colormap.xml"))
     crystalModel.castShadows = true
+    GS.etCrystalNode = crystalChild  -- 保存引用，用于旋转动画
 
-    -- 发光粒子
+    -- ================================================================
+    -- 四角装饰水晶（底座四角各一簇小水晶）
+    -- ================================================================
+    local cornerOffsets = {
+        Vector3( 0.55, 0.18,  0.55),
+        Vector3(-0.55, 0.18,  0.55),
+        Vector3( 0.55, 0.18, -0.55),
+        Vector3(-0.55, 0.18, -0.55),
+    }
+    local cornerYaws = { 45, 135, -45, -135 }
+    for ci = 1, 4 do
+        local cNode = node:CreateChild("ETCornerCrystal" .. ci)
+        cNode.position = cornerOffsets[ci]
+        cNode.scale = Vector3(0.6, 0.7, 0.6)
+        cNode.rotation = Quaternion(cornerYaws[ci], Vector3.UP)
+        local cModel = cNode:CreateComponent("StaticModel")
+        cModel:SetModel(cache:GetResource("Model", "Meshes/TD/detail-crystal.mdl"))
+        cModel:SetMaterial(cache:GetResource("Material", "Materials/TD/detail-crystal_00_colormap.xml"))
+        cModel.castShadows = true
+    end
+
+    -- ================================================================
+    -- 底座水晶圆环（tile-crystal 围绕底座）
+    -- ================================================================
+    local ringAngles = { 0, 90, 180, 270 }
+    local ringDist = 0.65
+    for ri = 1, 4 do
+        local rad = math.rad(ringAngles[ri])
+        local rx = math.sin(rad) * ringDist
+        local rz = math.cos(rad) * ringDist
+        local rNode = node:CreateChild("ETRingCrystal" .. ri)
+        rNode.position = Vector3(rx, 0.0, rz)
+        rNode.scale = Vector3(0.35, 0.45, 0.35)
+        rNode.rotation = Quaternion(ringAngles[ri] + 45, Vector3.UP)
+        local rModel = rNode:CreateComponent("StaticModel")
+        rModel:SetModel(cache:GetResource("Model", "Meshes/TD/tile-crystal.mdl"))
+        rModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tile-crystal_00_colormap.xml"))
+        rModel.castShadows = true
+    end
+
+    -- ================================================================
+    -- 上升能量粒子（围绕塔身螺旋上升）
+    -- ================================================================
     local particleNode = GS.scene:CreateChild("ETParticles")
-    particleNode.position = Vector3(0, 0.25, 0)
+    particleNode.position = Vector3(0, 0.5, 0)
 
     local emitter = particleNode:CreateComponent("ParticleEmitter")
     local effect = ParticleEffect()
     effect:SetEmitterType(EMITTER_SPHERE)
-    effect:SetEmitterSize(Vector3(2.6, 0.15, 2.6))
-    effect:SetNumParticles(80)
-    effect:SetMinEmissionRate(35)
-    effect:SetMaxEmissionRate(55)
-    effect:SetMinTimeToLive(0.4)
-    effect:SetMaxTimeToLive(0.9)
-    effect:SetMinParticleSize(Vector2(0.015, 0.015))
-    effect:SetMaxParticleSize(Vector2(0.04, 0.04))
-    effect:SetMinDirection(Vector3(-0.2, 1.0, -0.2))
-    effect:SetMaxDirection(Vector3(0.2, 1.5, 0.2))
-    effect:SetMinVelocity(0.8)
-    effect:SetMaxVelocity(1.5)
-    effect:SetDampingForce(1.5)
-    effect:SetMinRotationSpeed(90)
-    effect:SetMaxRotationSpeed(240)
-    effect:AddColorTime(Color(1.0, 0.9, 0.4, 0.0), 0.0)
-    effect:AddColorTime(Color(1.0, 0.8, 0.25, 1.0), 0.1)
-    effect:AddColorTime(Color(1.0, 0.65, 0.15, 0.5), 0.4)
-    effect:AddColorTime(Color(0.8, 0.4, 0.05, 0.0), 1.0)
+    effect:SetEmitterSize(Vector3(1.8, 0.1, 1.8))
+    effect:SetNumParticles(100)
+    effect:SetMinEmissionRate(40)
+    effect:SetMaxEmissionRate(60)
+    effect:SetMinTimeToLive(0.6)
+    effect:SetMaxTimeToLive(1.2)
+    effect:SetMinParticleSize(Vector2(0.02, 0.02))
+    effect:SetMaxParticleSize(Vector2(0.055, 0.055))
+    effect:SetMinDirection(Vector3(-0.3, 1.5, -0.3))
+    effect:SetMaxDirection(Vector3(0.3, 2.5, 0.3))
+    effect:SetMinVelocity(1.0)
+    effect:SetMaxVelocity(2.0)
+    effect:SetDampingForce(1.2)
+    effect:SetMinRotationSpeed(120)
+    effect:SetMaxRotationSpeed(300)
+    effect:AddColorTime(Color(0.4, 0.8, 1.0, 0.0), 0.0)
+    effect:AddColorTime(Color(0.6, 0.9, 1.0, 0.9), 0.15)
+    effect:AddColorTime(Color(1.0, 0.85, 0.35, 0.7), 0.5)
+    effect:AddColorTime(Color(1.0, 0.6, 0.1, 0.0), 1.0)
 
     local pMat = Material:new()
     pMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-    pMat:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.85, 0.35, 1.0)))
-    pMat:SetShaderParameter("MatEmissiveColor", Variant(Color(2.0, 1.5, 0.4)))
+    pMat:SetShaderParameter("MatDiffColor", Variant(Color(0.8, 0.9, 1.0, 1.0)))
+    pMat:SetShaderParameter("MatEmissiveColor", Variant(Color(1.5, 1.8, 2.5)))
     pMat:SetShaderParameter("Metallic", Variant(0.0))
     pMat:SetShaderParameter("Roughness", Variant(1.0))
     effect:SetMaterial(pMat)
     emitter:SetEffect(effect)
     emitter:SetEmitting(true)
+
+    -- ================================================================
+    -- 顶部光柱粒子（从水晶向上发射的聚焦光柱）
+    -- ================================================================
+    local beamNode = GS.scene:CreateChild("ETBeamParticles")
+    beamNode.position = Vector3(0, 3.5, 0)
+
+    local beamEmitter = beamNode:CreateComponent("ParticleEmitter")
+    local beamEffect = ParticleEffect()
+    beamEffect:SetEmitterType(EMITTER_SPHERE)
+    beamEffect:SetEmitterSize(Vector3(0.25, 0.05, 0.25))
+    beamEffect:SetNumParticles(30)
+    beamEffect:SetMinEmissionRate(15)
+    beamEffect:SetMaxEmissionRate(25)
+    beamEffect:SetMinTimeToLive(0.3)
+    beamEffect:SetMaxTimeToLive(0.7)
+    beamEffect:SetMinParticleSize(Vector2(0.03, 0.03))
+    beamEffect:SetMaxParticleSize(Vector2(0.08, 0.08))
+    beamEffect:SetMinDirection(Vector3(-0.05, 1.0, -0.05))
+    beamEffect:SetMaxDirection(Vector3(0.05, 1.0, 0.05))
+    beamEffect:SetMinVelocity(1.5)
+    beamEffect:SetMaxVelocity(3.0)
+    beamEffect:SetDampingForce(0.8)
+    beamEffect:AddColorTime(Color(1.0, 0.9, 0.4, 0.0), 0.0)
+    beamEffect:AddColorTime(Color(1.0, 0.85, 0.3, 1.0), 0.15)
+    beamEffect:AddColorTime(Color(1.0, 0.7, 0.2, 0.3), 0.6)
+    beamEffect:AddColorTime(Color(0.8, 0.5, 0.1, 0.0), 1.0)
+
+    local beamMat = Material:new()
+    beamMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+    beamMat:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.9, 0.5, 1.0)))
+    beamMat:SetShaderParameter("MatEmissiveColor", Variant(Color(2.5, 2.0, 0.6)))
+    beamMat:SetShaderParameter("Metallic", Variant(0.0))
+    beamMat:SetShaderParameter("Roughness", Variant(1.0))
+    beamEffect:SetMaterial(beamMat)
+    beamEmitter:SetEffect(beamEffect)
+    beamEmitter:SetEmitting(true)
 
     -- 血量 (等级驱动)
     local stats = M.GetLevelStats()
@@ -198,7 +359,7 @@ function M.PlaceEnergyTower()
 
     -- 血条
     GS.etHPBg = GS.scene:CreateChild("EnergyTowerHPBar")
-    GS.etHPBg.position = Vector3(0, 3.6, 0)
+    GS.etHPBg.position = Vector3(0, 4.6, 0)
 
     local bg = GS.etHPBg:CreateChild("ETHPBg")
     bg.scale = Vector3(CONFIG.EnergyTowerHPBarW, CONFIG.EnergyTowerHPBarH, 0.01)
@@ -246,6 +407,43 @@ function M.UpdateEnergyTowerHP()
     end
     GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(r, g, 0.1, 1.0)))
     GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(r * 0.3, g * 0.3, 0.02)))
+end
+
+-- ============================================================================
+-- 水晶 & 能量环旋转动画
+-- ============================================================================
+local etCrystalYaw_ = 0
+local etRingYaws_ = { 0, 0, 0 }
+-- 环旋转速度（度/秒）：底环慢、中环中速反转、顶环快
+local RING_SPEEDS = { 25, -40, 55 }
+-- 环的基础倾斜（初始旋转保持）
+local RING_TILTS = {
+    Quaternion(0, 0, 0),                 -- 环1 水平
+    Quaternion(15, Vector3.FORWARD),      -- 环2 前倾15°
+    Quaternion(-12, Vector3.RIGHT),       -- 环3 右倾-12°
+}
+
+function M.UpdateEnergyTowerAnim(dt)
+    -- 水晶旋转
+    if GS.etCrystalNode then
+        etCrystalYaw_ = etCrystalYaw_ + dt * 30
+        if etCrystalYaw_ >= 360 then etCrystalYaw_ = etCrystalYaw_ - 360 end
+        GS.etCrystalNode.rotation = Quaternion(etCrystalYaw_, Vector3.UP)
+    end
+
+    -- 能量环旋转
+    if GS.etRingNodes then
+        for i = 1, 3 do
+            local ring = GS.etRingNodes[i]
+            if ring then
+                etRingYaws_[i] = etRingYaws_[i] + dt * RING_SPEEDS[i]
+                if etRingYaws_[i] >= 360 then etRingYaws_[i] = etRingYaws_[i] - 360 end
+                if etRingYaws_[i] <= -360 then etRingYaws_[i] = etRingYaws_[i] + 360 end
+                -- 先倾斜再绕 Y 轴自转
+                ring.rotation = RING_TILTS[i] * Quaternion(etRingYaws_[i], Vector3.UP)
+            end
+        end
+    end
 end
 
 function M.DamageEnergyTower(dmg)
@@ -945,6 +1143,9 @@ function M.ToggleWiringMode()
         wiringEdgeSet_ = nil
         GS.wiringHintMsg = nil
     end
+    -- 切换布线模式时取消待确认的建塔加号
+    local Tower = require("Tower")
+    Tower.CancelPlacement()
     print("[Wiring] Mode: " .. (GS.wiringMode and "ON" or "OFF"))
 end
 

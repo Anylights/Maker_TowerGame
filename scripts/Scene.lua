@@ -303,6 +303,28 @@ function M.CreateHoverIndicator()
 end
 
 -- ============================================================================
+-- 放置确认标记（与 hover 相同外观，固定在待确认格子上）
+-- ============================================================================
+
+function M.CreatePlacementMarker()
+    GS.placementMarker = GS.scene:CreateChild("PlacementMarker")
+    GS.placementMarker.position = Vector3(0, CONFIG.HoverY, 0)
+    GS.placementMarker.scale = Vector3(0.92, 1.0, 0.92)
+    local model = GS.placementMarker:CreateComponent("StaticModel")
+    model:SetModel(cache:GetResource("Model", "Meshes/TD/selection-a.mdl"))
+
+    local mat = Material:new()
+    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+    mat:SetShaderParameter("MatDiffColor", Variant(Color(0.3, 0.9, 1.0, 0.55)))
+    mat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.15, 0.45, 0.5)))
+    mat:SetShaderParameter("Metallic", Variant(0.0))
+    mat:SetShaderParameter("Roughness", Variant(0.5))
+    model:SetMaterial(mat)
+
+    GS.placementMarker.enabled = false
+end
+
+-- ============================================================================
 -- 相机输入
 -- ============================================================================
 

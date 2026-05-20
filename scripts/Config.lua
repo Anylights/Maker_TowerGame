@@ -190,6 +190,14 @@ M.GS = {
     hoverValid = false,
     hoverOnMap = false,
 
+    -- 建塔两步确认
+    placementPending = false,   -- 是否有待确认的建塔位置
+    placementGX = 0,            -- 待确认位置 X
+    placementGZ = 0,            -- 待确认位置 Z
+    placementMarker = nil,      -- 放置确认标记节点
+    etCrystalNode = nil,        -- 能源塔顶部水晶节点（旋转动画用）
+    etRingNodes = nil,          -- 能源塔旋转能量环节点列表
+
     -- 能源网络 (统一图模型)
     energyGraph = {
         nodes = {},        -- nodeKey("x,z") → { x=gx, z=gz, edges={edgeKey,...} }
@@ -241,5 +249,87 @@ M.GS = {
     artifactDropPending = false,  -- 是否有待处理的掉落选择
     artifactDropCandidates = nil, -- 3选1 候选列表
 }
+
+-- ============================================================================
+-- 重置游戏状态（重开时调用）
+-- ============================================================================
+
+function M.ResetGS()
+    -- 清理旧场景
+    if M.GS.scene then
+        M.GS.scene:Remove()
+    end
+
+    -- 重置所有运行时状态到初始值
+    M.GS.scene = nil
+    M.GS.cameraNode = nil
+    M.GS.camera = nil
+
+    M.GS.gold = M.CONFIG.InitialGold
+    M.GS.material = M.CONFIG.InitialMaterial
+    M.GS.energy = M.CONFIG.InitialEnergy
+
+    M.GS.etLevel = 1
+    M.GS.towers = {}
+    M.GS.monsters = {}
+    M.GS.projectiles = {}
+    M.GS.loots = {}
+    M.GS.dmgTexts = {}
+    M.GS.spawnTimer = 0
+
+    M.GS.etHP = 0
+    M.GS.etMaxHP = 0
+    M.GS.gameSpeed = 1
+    M.GS.gameOver = false
+
+    M.GS.hoverNode = nil
+    M.GS.hoverGX = 0
+    M.GS.hoverGZ = 0
+    M.GS.hoverValid = false
+    M.GS.hoverOnMap = false
+
+    M.GS.placementPending = false
+    M.GS.placementGX = 0
+    M.GS.placementGZ = 0
+    M.GS.placementMarker = nil
+    M.GS.etCrystalNode = nil
+    M.GS.etRingNodes = nil
+
+    M.GS.energyGraph = { nodes = {}, edges = {}, edgeCount = 0 }
+    M.GS.energyNetwork = {
+        parent = {}, rank = {},
+        hasCycle = false, spanTree = {},
+        edgePower = {}, nodePower = {},
+    }
+    M.GS.shortCircuit = { active = false, dmgAccum = 0 }
+    M.GS.wiringMode = false
+    M.GS.wiringStart = nil
+    M.GS.wiringPreviewNodes = {}
+    M.GS.wiringHintMsg = nil
+    M.GS.wiringHintTimer = 0
+
+    M.GS.linesNode = nil
+    M.GS.lineMat = nil
+    M.GS.linePulseTime = 0
+    M.GS.pulsesNode = nil
+    M.GS.pulses = {}
+
+    M.GS.etHPBg = nil
+    M.GS.etHPFill = nil
+    M.GS.etFillMat = nil
+
+    M.GS.terrainObjects = {}
+
+    M.GS.currentWave = 0
+    M.GS.wavePhase = "preparing"
+    M.GS.waveTimer = 0
+    M.GS.waveSpawnIndex = 0
+    M.GS.waveSpawnTimer = 0
+    M.GS.monstersKilled = 0
+
+    M.GS.artifactInventory = {}
+    M.GS.artifactDropPending = false
+    M.GS.artifactDropCandidates = nil
+end
 
 return M

@@ -101,6 +101,10 @@ local detailSubSlot_ = nil
 local detailTitleLabel_ = nil
 local detailStatsLabel_ = nil
 
+-- 建塔确认气泡
+local placementBubble_ = nil
+local placementBubbleCostLabel_ = nil
+
 
 -- ============================================================================
 -- 圣器视觉映射
@@ -404,6 +408,9 @@ function M.CreateGameUI()
     -- ---- 塔详情面板（悬浮，初始隐藏）----
     towerDetailPanel_ = M.BuildTowerDetailPanel()
 
+    -- ---- 建塔确认气泡（悬浮，初始隐藏）----
+    placementBubble_ = M.BuildPlacementBubble()
+
     -- ---- 统一 Root ----
     gameRoot_ = UI.Panel {
         width = "100%", height = "100%",
@@ -412,6 +419,7 @@ function M.CreateGameUI()
             hudLayer_,
             inventoryPanel_,
             towerDetailPanel_,
+            placementBubble_,
             dragCtx_,  -- 最上层，渲染拖拽图标
         },
     }
@@ -711,6 +719,98 @@ function M.BuildTowerDetailPanel()
     }
 
     return panel
+end
+
+-- ============================================================================
+-- 建塔确认气泡（悬浮 UI，投影到世界坐标上方）
+-- ============================================================================
+
+function M.BuildPlacementBubble()
+    placementBubbleCostLabel_ = UI.Label {
+        text = "", fontSize = 11,
+        fontColor = { 255, 220, 80, 240 },
+        textAlign = "center",
+    }
+
+    placementBubble_ = UI.Panel {
+        position = "absolute",
+        top = -9999, left = -9999,
+        display = "none",
+        flexDirection = "column", gap = 3,
+        alignItems = "center",
+        children = {
+            -- 圆形 "+" 按钮
+            UI.Button {
+                text = "+",
+                width = 50, height = 50,
+                fontSize = 32,
+                variant = "primary",
+                onClick = function()
+                    M.ConfirmPlacement()
+                end,
+            },
+            -- 造价标签
+            UI.Panel {
+                backgroundColor = { 0, 0, 0, 170 },
+                borderRadius = 6, paddingX = 8, paddingY = 2,
+                children = { placementBubbleCostLabel_ },
+            },
+        },
+    }
+
+    return placementBubble_
+end
+
+--- 通过 UI 气泡确认建塔
+function M.ConfirmPlacement()
+    if not GS.placementPending then return end
+    local Tower = require("Tower")
+    local gx, gz = GS.placementGX, GS.placementGZ
+    Tower.CancelPlacement()  -- 重置 placementPending
+    M.HideTowerDetail()
+    Tower.PlaceBasicTower(gx, gz)
+end
+
+--- 每帧更新气泡位置（世界坐标投影到屏幕）
+function M.UpdatePlacementBubble()
+    if not placementBubble_ then return end
+
+    if not GS.placementPending then
+        placementBubble_:SetStyle({ display = "none", top = -9999, left = -9999 })
+        return
+    end
+
+    -- 投影世界坐标到屏幕
+    local worldPos = Vector3(GS.placementGX, 1.0, GS.placementGZ)
+    local screenNorm = GS.camera:WorldToScreenPoint(worldPos)
+
+    local dpr = graphics:GetDPR()
+    local screenW = graphics:GetWidth() / dpr
+    local screenH = graphics:GetHeight() / dpr
+
+    local sx = screenNorm.x * screenW
+    local sy = screenNorm.y * screenH
+
+    -- 气泡居中于锚点上方
+    local bubbleW = 56
+    local bubbleH = 76
+    local px = sx - bubbleW * 0.5
+    local py = sy - bubbleH - 6
+
+    -- 边界约束
+    px = math.max(4, math.min(screenW - bubbleW - 4, px))
+    py = math.max(4, math.min(screenH - bubbleH - 4, py))
+
+    local newTop = math.floor(py)
+    local newLeft = math.floor(px)
+
+    -- 更新造价
+    local Tower = require("Tower")
+    if placementBubbleCostLabel_ then
+        placementBubbleCostLabel_:SetText(Tower.GetTowerCost() .. "g")
+    end
+
+    placementBubble_:SetStyle({ display = "flex", top = newTop, left = newLeft })
 end
 
 -- ============================================================================
@@ -1064,6 +1164,9 @@ function M.RefreshUI()
         end
     end
 
+    -- ---- 建塔确认气泡位置更新 ----
+    M.UpdatePlacementBubble()
+
     -- ---- 背包面板滑入/滑出动画驱动 ----
     if invAnimating_ and inventoryPanel_ then
         local elapsed = time.elapsedTime - invAnimStartTime_
@@ -1109,7 +1212,14 @@ function M.UpdateHintLabel()
     end
 
     if not GS.hoverOnMap then
-        hintLabel_:SetText("LClick: Build | Click Tower: Detail | X: Sell | U: Upgrade | E: Wire | B: Bag | Tab: Speed | MMB: Pan")
+        if GS.placementPending then
+            hintLabel_:SetText(string.format(
+                "Click [+] at (%d,%d) to confirm | Click elsewhere to cancel | E: Wire | B: Bag | MMB: Pan",
+                GS.placementGX, GS.placementGZ
+            ))
+        else
+            hintLabel_:SetText("LClick: Place marker | Click Tower: Detail | X: Sell | U: Upgrade | E: Wire | B: Bag | Tab: Speed | MMB: Pan")
+        end
         return
     end
 
@@ -1160,11 +1270,17 @@ function M.UpdateHintLabel()
     elseif not canAfford then
         hintLabel_:SetText("Not enough gold! Need: " .. Tower.GetTowerCost())
     else
-        -- 新塔尚未连线，显示建造成本和提示
-        hintLabel_:SetText(string.format(
-            "Build | Cost: %d | Need wiring to activate",
-            Tower.GetTowerCost()
-        ))
+        if GS.placementPending and gx == GS.placementGX and gz == GS.placementGZ then
+            hintLabel_:SetText(string.format(
+                "Click again to BUILD here | Cost: %d",
+                Tower.GetTowerCost()
+            ))
+        else
+            hintLabel_:SetText(string.format(
+                "Click to mark | Cost: %d",
+                Tower.GetTowerCost()
+            ))
+        end
     end
 end
 
@@ -1391,6 +1507,17 @@ local function isMouseOverUIPanel()
         end
     end
 
+    -- 检查建塔确认气泡（动态定位，约 56x76）
+    if GS.placementPending and placementBubble_ and placementBubble_.props then
+        local bp = placementBubble_.props
+        if bp.top and bp.top > -9000 and bp.left and bp.left > -9000 then
+            local bubbleProps = { top = bp.top, left = bp.left, width = 56, height = 76 }
+            if isMouseInPanel(bubbleProps, screenW, screenH) then
+                return true
+            end
+        end
+    end
+
     return false
 end
 
@@ -1516,6 +1643,14 @@ function M.ShowGameOver()
                         text = "Energy Tower Destroyed", fontSize = 14,
                         fontColor = { 255, 180, 100, 200 },
                     },
+                    UI.Button {
+                        text = "Restart", variant = "primary",
+                        width = 160, height = 42, fontSize = 18,
+                        onClick = function()
+                            M.Shutdown()
+                            Start()
+                        end,
+                    },
                 },
             },
         },
@@ -1546,6 +1681,14 @@ function M.ShowVictory()
                     UI.Label {
                         text = "Congratulations, Commander!", fontSize = 14,
                         fontColor = { 255, 220, 100, 200 },
+                    },
+                    UI.Button {
+                        text = "Play Again", variant = "primary",
+                        width = 160, height = 42, fontSize = 18,
+                        onClick = function()
+                            M.Shutdown()
+                            Start()
+                        end,
                     },
                 },
             },

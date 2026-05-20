@@ -26,6 +26,13 @@ local victoryShown_ = false
 function Start()
     graphics.windowTitle = CONFIG.Title
 
+    -- 重置 GameOver/Victory 标记（重开时需要）
+    gameOverShown_ = false
+    victoryShown_ = false
+
+    -- 重置游戏状态
+    Cfg.ResetGS()
+
     -- UI
     GameUI.InitUI()
 
@@ -41,8 +48,9 @@ function Start()
     -- 圣器系统
     Artifact.Init()
 
-    -- 悬停指示器
+    -- 悬停指示器 & 放置确认标记
     Scene.CreateHoverIndicator()
+    Scene.CreatePlacementMarker()
 
     -- 路径标记 & 升级提示箭头
     Scene.CreatePathMarkers()
@@ -91,8 +99,9 @@ function HandleUpdate(eventType, eventData)
     Scene.HandleCameraPan()
     Scene.HandleCameraZoom()
 
-    -- 能源塔血条更新（始终刷新颜色）
+    -- 能源塔血条更新（始终刷新颜色）+ 水晶旋转动画
     EnergyTower.UpdateEnergyTowerHP()
+    EnergyTower.UpdateEnergyTowerAnim(rawDt)
 
     -- 能源线脉冲动画
     EnergyTower.UpdateEnergyLinePulse(dt)

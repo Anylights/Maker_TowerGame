@@ -455,6 +455,30 @@ function M.HandleGridHover()
     end
 end
 
+--- 显示放置确认标记（3D 四角框 + UI 气泡由 GameUI 渲染）
+local function ShowPlacementPlus(gx, gz)
+    GS.placementPending = true
+    GS.placementGX = gx
+    GS.placementGZ = gz
+    if GS.placementMarker then
+        GS.placementMarker.position = Vector3(gx, CONFIG.HoverY, gz)
+        GS.placementMarker.enabled = true
+    end
+end
+
+--- 隐藏放置确认标记
+local function HidePlacementPlus()
+    GS.placementPending = false
+    if GS.placementMarker then
+        GS.placementMarker.enabled = false
+    end
+end
+
+--- 公开 API：取消待确认的放置（布线模式切换时调用）
+function M.CancelPlacement()
+    HidePlacementPlus()
+end
+
 function M.HandlePlacement()
     local GameUI = require("GameUI")
 
@@ -464,16 +488,45 @@ function M.HandlePlacement()
             return
         end
 
-        if GS.hoverValid then
-            -- 点击空地建塔，关闭详情面板
-            GameUI.HideTowerDetail()
-            M.PlaceBasicTower(GS.hoverGX, GS.hoverGZ)
+        local gx, gz = GS.hoverGX, GS.hoverGZ
+
+        -- ---- 两步确认流程（确认通过 UI 气泡按钮）----
+        if GS.placementPending then
+            -- 已有待确认位置
+            if gx == GS.placementGX and gz == GS.placementGZ then
+                -- 再次点击同一位置 → 取消（确认改由气泡按钮触发）
+                HidePlacementPlus()
+                return
+            else
+                -- 点击了其他位置 → 取消当前加号，如果新位置有效则移动到新位置
+                HidePlacementPlus()
+                if GS.hoverValid then
+                    ShowPlacementPlus(gx, gz)
+                end
+                return
+            end
+        else
+            -- 无待确认位置
+            if GS.hoverValid then
+                -- 点击有效空地 → 显示加号
+                ShowPlacementPlus(gx, gz)
+                return
+            end
         end
         -- 塔详情 open/toggle/switch 由 GameUI.HandleArtifactInput 统一处理
     end
 
+    -- 右键或 Escape 取消待确认放置
+    if GS.placementPending then
+        if input:GetMouseButtonPress(MOUSEB_RIGHT) or input:GetKeyPress(KEY_ESCAPE) then
+            HidePlacementPlus()
+            return
+        end
+    end
+
     -- X 键拆除悬停处的塔
     if input:GetKeyPress(KEY_X) and GS.hoverOnMap then
+        HidePlacementPlus()
         local idx = M.GetTowerAtHover()
         if idx then
             M.DemolishTower(idx)
