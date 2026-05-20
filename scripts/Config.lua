@@ -152,10 +152,7 @@ M.CONFIG = {
     SteerAvoidRadius = 1.2,        -- 避障检测半径(米)
 
     -- === 刷新指示器 ===
-    IndicatorFadeInTime = 1.5,     -- 指示器淡入时间(秒)
-    IndicatorStayTime = 2.0,       -- 指示器停留时间(秒)
-    IndicatorFadeOutTime = 1.0,    -- 指示器淡出时间(秒)
-    IndicatorArcWidth = 1.0,       -- 扇环宽度(能源塔范围单位)
+    IndicatorArcWidth = 2.5,       -- 扇环径向宽度(米), 从范围圈向外延伸
     BossWarnTriSize = 0.8,         -- Boss 警告三角形尺寸(米)
     -- 塔攻击
     TowerRange = 5.0,

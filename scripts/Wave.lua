@@ -207,18 +207,28 @@ end
 -- 刷新指示器 (CustomGeometry 扇环 / Boss 三角警告)
 -- ============================================================================
 
---- 创建一个扇环指示器 (地面贴合)
+--- 创建一个扇环指示器 (地面贴合, 内圈紧贴范围圈, 从内到外红色→透明渐变)
 --- @param angle number 中心角度 (弧度)
 --- @param isBoss boolean 是否为 Boss 警告
 --- @return Node 指示器节点
 local function CreateSectorIndicator(angle, isBoss)
     local range = EnergyTower.GetEnergyRange()
-    local spawnDist = range * CONFIG.SpawnDistanceFactor
-    local innerR = spawnDist - CONFIG.IndicatorArcWidth * 0.5
-    local outerR = spawnDist + CONFIG.IndicatorArcWidth * 0.5
+    local innerR = range                                 -- 内圈紧贴范围圈
+    local outerR = range + CONFIG.IndicatorArcWidth      -- 外圈向外扩展
     local halfAngle = CONFIG.SectorAngleRad * 0.5
-    local segments = 12
+    local arcSegments = 16    -- 圆弧细分
+    local radialLayers = 5    -- 径向分层 (实现渐变)
     local y = CONFIG.GridY + 0.01
+
+    -- 颜色参数
+    local baseColor
+    if isBoss then
+        baseColor = { r = 1.0, g = 0.7, b = 0.0 }  -- Boss: 橙黄
+    else
+        baseColor = { r = 1.0, g = 0.0, b = 0.0 }  -- 普通: 纯红 #FF0000
+    end
+    local innerAlpha = 0.72   -- 内圈不透明度
+    local outerAlpha = 0.0    -- 外圈完全透明
 
     local node = GS.scene:CreateChild("SectorIndicator")
     node.position = Vector3(0, y, 0)
@@ -226,47 +236,47 @@ local function CreateSectorIndicator(angle, isBoss)
     local geom = node:CreateComponent("CustomGeometry")
     geom:BeginGeometry(0, TRIANGLE_LIST)
 
-    -- 构建扇环: segments 个梯形, 每个梯形 2 个三角形
-    for s = 0, segments - 1 do
-        local a0 = angle - halfAngle + (s / segments) * halfAngle * 2
-        local a1 = angle - halfAngle + ((s + 1) / segments) * halfAngle * 2
-        local cos0, sin0 = math.cos(a0), math.sin(a0)
-        local cos1, sin1 = math.cos(a1), math.sin(a1)
+    -- 构建多层扇环: radialLayers 层 × arcSegments 段
+    for layer = 0, radialLayers - 1 do
+        local t0 = layer / radialLayers
+        local t1 = (layer + 1) / radialLayers
+        local r0 = innerR + (outerR - innerR) * t0
+        local r1 = innerR + (outerR - innerR) * t1
+        -- alpha 按层线性插值
+        local alpha0 = innerAlpha + (outerAlpha - innerAlpha) * t0
+        local alpha1 = innerAlpha + (outerAlpha - innerAlpha) * t1
+        local c0 = Color(baseColor.r, baseColor.g, baseColor.b, alpha0)
+        local c1 = Color(baseColor.r, baseColor.g, baseColor.b, alpha1)
 
-        -- 4 个顶点: 内左, 内右, 外右, 外左
-        local il = Vector3(cos0 * innerR, 0, sin0 * innerR)
-        local ir = Vector3(cos1 * innerR, 0, sin1 * innerR)
-        local or_ = Vector3(cos1 * outerR, 0, sin1 * outerR)
-        local ol = Vector3(cos0 * outerR, 0, sin0 * outerR)
+        for s = 0, arcSegments - 1 do
+            local a0 = angle - halfAngle + (s / arcSegments) * halfAngle * 2
+            local a1 = angle - halfAngle + ((s + 1) / arcSegments) * halfAngle * 2
+            local cos0, sin0 = math.cos(a0), math.sin(a0)
+            local cos1, sin1 = math.cos(a1), math.sin(a1)
 
-        -- 三角形1: il, ir, or_
-        geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
-        geom:DefineVertex(ir); geom:DefineNormal(Vector3.UP)
-        geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
+            -- 4 个顶点: 内左, 内右, 外右, 外左
+            local il = Vector3(cos0 * r0, 0, sin0 * r0)
+            local ir = Vector3(cos1 * r0, 0, sin1 * r0)
+            local or_ = Vector3(cos1 * r1, 0, sin1 * r1)
+            local ol = Vector3(cos0 * r1, 0, sin0 * r1)
 
-        -- 三角形2: il, or_, ol
-        geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
-        geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
-        geom:DefineVertex(ol); geom:DefineNormal(Vector3.UP)
+            -- 三角形1: il, ir, or_
+            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP); geom:DefineColor(c0)
+            geom:DefineVertex(ir); geom:DefineNormal(Vector3.UP); geom:DefineColor(c0)
+            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP); geom:DefineColor(c1)
+
+            -- 三角形2: il, or_, ol
+            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP); geom:DefineColor(c0)
+            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP); geom:DefineColor(c1)
+            geom:DefineVertex(ol); geom:DefineNormal(Vector3.UP); geom:DefineColor(c1)
+        end
     end
 
     geom:Commit()
 
-    -- 材质
+    -- 材质: 无光照 + 顶点颜色 (颜色来自 DefineColor)
     local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-    local diffColor, emitColor
-    if isBoss then
-        diffColor = MOEBIUS.BossWarnDiff
-        emitColor = MOEBIUS.BossWarnEmit
-    else
-        diffColor = MOEBIUS.IndicatorDiff
-        emitColor = MOEBIUS.IndicatorEmit
-    end
-    mat:SetShaderParameter("MatDiffColor", Variant(Color(diffColor.r, diffColor.g, diffColor.b, diffColor.a)))
-    mat:SetShaderParameter("MatEmissiveColor", Variant(emitColor))
-    mat:SetShaderParameter("Metallic", Variant(0.0))
-    mat:SetShaderParameter("Roughness", Variant(1.0))
+    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlitVCol.xml"))
     geom:SetMaterial(mat)
 
     return node
@@ -277,7 +287,7 @@ end
 --- @return Node
 local function CreateBossWarning(angle)
     local range = EnergyTower.GetEnergyRange()
-    local dist = range * CONFIG.SpawnDistanceFactor + CONFIG.IndicatorArcWidth + 0.5
+    local dist = range + CONFIG.IndicatorArcWidth + 0.8  -- 紧接扇环外侧
     local cx = math.cos(angle) * dist
     local cz = math.sin(angle) * dist
     local y = CONFIG.GridY + 0.02
@@ -294,15 +304,16 @@ local function CreateBossWarning(angle)
     local top = Vector3(0, h * 0.67, 0)
     local bl = Vector3(-s * 0.5, -h * 0.33, 0)
     local br = Vector3(s * 0.5, -h * 0.33, 0)
+    local warnColor = Color(1.0, 0.85, 0.10, 0.80)
 
     -- 正面
-    geom:DefineVertex(top); geom:DefineNormal(Vector3.FORWARD)
-    geom:DefineVertex(bl);  geom:DefineNormal(Vector3.FORWARD)
-    geom:DefineVertex(br);  geom:DefineNormal(Vector3.FORWARD)
+    geom:DefineVertex(top); geom:DefineNormal(Vector3.FORWARD); geom:DefineColor(warnColor)
+    geom:DefineVertex(bl);  geom:DefineNormal(Vector3.FORWARD); geom:DefineColor(warnColor)
+    geom:DefineVertex(br);  geom:DefineNormal(Vector3.FORWARD); geom:DefineColor(warnColor)
     -- 背面
-    geom:DefineVertex(top); geom:DefineNormal(Vector3.BACK)
-    geom:DefineVertex(br);  geom:DefineNormal(Vector3.BACK)
-    geom:DefineVertex(bl);  geom:DefineNormal(Vector3.BACK)
+    geom:DefineVertex(top); geom:DefineNormal(Vector3.BACK); geom:DefineColor(warnColor)
+    geom:DefineVertex(br);  geom:DefineNormal(Vector3.BACK); geom:DefineColor(warnColor)
+    geom:DefineVertex(bl);  geom:DefineNormal(Vector3.BACK); geom:DefineColor(warnColor)
 
     geom:Commit()
 
@@ -311,12 +322,7 @@ local function CreateBossWarning(angle)
     node.rotation = Quaternion(yaw, Vector3.UP)
 
     local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-    mat:SetShaderParameter("MatDiffColor", Variant(Color(
-        MOEBIUS.BossWarnDiff.r, MOEBIUS.BossWarnDiff.g, MOEBIUS.BossWarnDiff.b, MOEBIUS.BossWarnDiff.a)))
-    mat:SetShaderParameter("MatEmissiveColor", Variant(MOEBIUS.BossWarnEmit))
-    mat:SetShaderParameter("Metallic", Variant(0.0))
-    mat:SetShaderParameter("Roughness", Variant(0.5))
+    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlitVCol.xml"))
     geom:SetMaterial(mat)
 
     return node
@@ -335,6 +341,63 @@ local function ClearIndicators()
 end
 
 
+
+-- ============================================================================
+-- 指示器动画
+-- ============================================================================
+
+local indicatorTime_ = 0  -- 累计动画时间
+
+--- 更新指示器动画 (每帧调用)
+--- preparing 阶段: 快速闪烁; 其他阶段: 缓慢呼吸脉冲
+local function UpdateIndicatorAnimation(dt)
+    indicatorTime_ = indicatorTime_ + dt
+
+    local isPreparing = (GS.wavePhase == "preparing")
+    local alpha
+    if isPreparing then
+        -- 快速闪烁: 4Hz sin 波, 在 0.4 ~ 1.0 之间振荡
+        alpha = 0.7 + 0.3 * math.sin(indicatorTime_ * 8.0 * math.pi)
+    else
+        -- 缓慢呼吸: 0.5Hz sin 波, 在 0.6 ~ 1.0 之间振荡
+        alpha = 0.8 + 0.2 * math.sin(indicatorTime_ * 1.0 * math.pi)
+    end
+
+    -- 扇环指示器: MatDiffColor 乘以顶点颜色
+    for _, n in ipairs(GS.indicatorNodes) do
+        if n then
+            local geom = n:GetComponent("CustomGeometry")
+            if geom then
+                local mat = geom:GetMaterial()
+                if mat then
+                    mat:SetShaderParameter("MatDiffColor",
+                        Variant(Color(1, 1, 1, alpha)))
+                end
+            end
+        end
+    end
+
+    -- Boss 三角警告: 同样调制
+    local bossAlpha
+    if isPreparing then
+        -- Boss 警告闪得更剧烈
+        bossAlpha = 0.5 + 0.5 * math.sin(indicatorTime_ * 10.0 * math.pi)
+    else
+        bossAlpha = 0.7 + 0.3 * math.sin(indicatorTime_ * 1.5 * math.pi)
+    end
+    for _, n in ipairs(GS.bossWarnNodes) do
+        if n then
+            local geom = n:GetComponent("CustomGeometry")
+            if geom then
+                local mat = geom:GetMaterial()
+                if mat then
+                    mat:SetShaderParameter("MatDiffColor",
+                        Variant(Color(1, 1, 1, bossAlpha)))
+                end
+            end
+        end
+    end
+end
 
 -- ============================================================================
 -- 波次运行时状态
@@ -385,6 +448,7 @@ function M.StartWave()
 
     GS.wavePhase = "preparing"
     GS.waveTimer = currentPrepTime_
+    indicatorTime_ = 0  -- 重置动画计时
 
     -- 生成刷新扇区
     GS.spawnSectors = GenerateSpawnSectors(GS.bigWave, GS.smallWave, GS.globalWave)
@@ -459,6 +523,9 @@ function M.Update(dt)
         M.StartWave()
         return
     end
+
+    -- 指示器动画 (所有阶段都执行)
+    UpdateIndicatorAnimation(dt)
 
     -- === 准备阶段 ===
     if GS.wavePhase == "preparing" then
