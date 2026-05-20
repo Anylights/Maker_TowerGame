@@ -37,6 +37,12 @@ M.MOEBIUS = {
     -- 能源线：深青色
     LinesDiff      = Color(0.30, 0.65, 0.80, 0.80),
     LinesEmit      = Color(0.20, 0.40, 0.60),
+    -- 刷新指示器：渐变红色扇环
+    IndicatorDiff  = Color(0.95, 0.20, 0.15, 0.50),
+    IndicatorEmit  = Color(0.50, 0.08, 0.05),
+    -- Boss 警告：黄色三角
+    BossWarnDiff   = Color(1.0, 0.85, 0.10, 0.65),
+    BossWarnEmit   = Color(0.55, 0.42, 0.05),
 }
 
 -- ============================================================================
@@ -119,6 +125,38 @@ M.CONFIG = {
     SpawnDistance = 18,
     MonsterGoldDrop = 15,
     MonsterEnergyDrop = 5,
+
+    -- === 波次系统 (大波次/小波次) ===
+    BigWaveSize = 8,               -- 每个大波次包含的小波次数
+    MiniBossSubWave = 4,           -- 第几小波出小Boss (shatter_titan)
+    BigBossSubWave = 8,            -- 第几小波出大Boss (line_devourer)
+    PrepTimeBase = 12,             -- 基础准备时间(秒)
+    PrepTimeBoss = 18,             -- Boss波准备时间(秒)
+    PrepTimeFirst = 30,            -- 首波准备时间(秒)
+
+    -- === HP 缩放 (抛物线: 1 + A*sqrt(w-1) + B*(w-1)) ===
+    HPScaleA = 1.8,
+    HPScaleB = 0.12,
+    BossHPScaleA = 1.2,            -- Boss 用更缓和的缩放
+    BossHPScaleB = 0.08,
+
+    -- === 径向刷新 ===
+    SpawnDistanceFactor = 2.0,     -- 刷新距离 = EnergyRange * 2 * 此值
+    SectorAngleDeg = 30,           -- 每个刷新扇区角度(度)
+    SectorAngleRad = math.rad(30), -- 预计算弧度
+    MaxSpawnPoints = { 3, 4, 4, 5, 5, 6 }, -- 大波次1/2/3/4/5/6+ 最大同时刷新点
+
+    -- === 转向避障 ===
+    SteerLookAhead = 1.5,          -- 前视距离(米)
+    SteerPushForce = 3.0,          -- 推力系数
+    SteerAvoidRadius = 1.2,        -- 避障检测半径(米)
+
+    -- === 刷新指示器 ===
+    IndicatorFadeInTime = 1.5,     -- 指示器淡入时间(秒)
+    IndicatorStayTime = 2.0,       -- 指示器停留时间(秒)
+    IndicatorFadeOutTime = 1.0,    -- 指示器淡出时间(秒)
+    IndicatorArcWidth = 1.0,       -- 扇环宽度(能源塔范围单位)
+    BossWarnTriSize = 0.8,         -- Boss 警告三角形尺寸(米)
     -- 塔攻击
     TowerRange = 5.0,
     TowerFireInterval = 1.0,
@@ -236,13 +274,19 @@ M.GS = {
     -- 场景物件 { node, type, gx, gz, hp, maxHp, buffType, buffValue, ... }
     terrainObjects = {},
 
-    -- 波次状态
-    currentWave = 0,
-    wavePhase = "preparing", -- "preparing" | "spawning" | "clearing" | "dropping" | "complete"
+    -- 波次状态 (新: 大波次/小波次)
+    bigWave = 0,                 -- 当前大波次编号 (1-based, 无上限)
+    smallWave = 0,               -- 当前小波次编号 (1-8, 在大波次内)
+    globalWave = 0,              -- 全局波次编号 = (bigWave-1)*8 + smallWave
+    currentWave = 0,             -- 向后兼容别名 (= globalWave)
+    wavePhase = "preparing",     -- "preparing" | "spawning" | "clearing" | "dropping"
     waveTimer = 0,
     waveSpawnIndex = 0,
     waveSpawnTimer = 0,
     monstersKilled = 0,
+    spawnSectors = {},           -- 当前波次刷新扇区 { {angle, count, delay, enemyId, ...}, ... }
+    indicatorNodes = {},         -- 扇区指示器节点列表 (CustomGeometry)
+    bossWarnNodes = {},          -- Boss 警告标记节点列表
 
     -- 圣器系统
     artifactInventory = {},       -- 背包: { {id, def, equipped, towerIndex, slotType}, ... }
@@ -320,12 +364,18 @@ function M.ResetGS()
 
     M.GS.terrainObjects = {}
 
+    M.GS.bigWave = 0
+    M.GS.smallWave = 0
+    M.GS.globalWave = 0
     M.GS.currentWave = 0
     M.GS.wavePhase = "preparing"
     M.GS.waveTimer = 0
     M.GS.waveSpawnIndex = 0
     M.GS.waveSpawnTimer = 0
     M.GS.monstersKilled = 0
+    M.GS.spawnSectors = {}
+    M.GS.indicatorNodes = {}
+    M.GS.bossWarnNodes = {}
 
     M.GS.artifactInventory = {}
     M.GS.artifactDropPending = false

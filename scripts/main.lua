@@ -21,14 +21,13 @@ local StatusEffect = require("StatusEffect")
 
 -- 记录是否已显示 GameOver/Victory 覆盖层（只触发一次）
 local gameOverShown_ = false
-local victoryShown_ = false
+
 
 function Start()
     graphics.windowTitle = CONFIG.Title
 
-    -- 重置 GameOver/Victory 标记（重开时需要）
+    -- 重置 GameOver 标记（重开时需要）
     gameOverShown_ = false
-    victoryShown_ = false
 
     -- 重置游戏状态
     Cfg.ResetGS()
@@ -52,8 +51,7 @@ function Start()
     Scene.CreateHoverIndicator()
     Scene.CreatePlacementMarker()
 
-    -- 路径标记 & 升级提示箭头
-    Scene.CreatePathMarkers()
+    -- 升级提示箭头
     Scene.CreateUpgradeHint()
 
     -- HUD
@@ -109,8 +107,7 @@ function HandleUpdate(eventType, eventData)
     -- 浮动伤害数字
     Utils.UpdateDmgTexts(dt)
 
-    -- 路径标记旋转 & 升级箭头动画
-    Scene.UpdatePathMarkers(dt)
+    -- 升级箭头动画
     Scene.UpdateUpgradeHint(dt)
 
     -- GameOver 检测
@@ -119,15 +116,6 @@ function HandleUpdate(eventType, eventData)
             gameOverShown_ = true
             GameUI.ShowGameOver()
             print("[GameOver] Energy Tower destroyed!")
-        end
-        return
-    end
-
-    -- Victory 检测
-    if GS.wavePhase == "victory" then
-        if not victoryShown_ then
-            victoryShown_ = true
-            GameUI.ShowVictory()
         end
         return
     end

@@ -1716,8 +1716,8 @@ function M.ShowGameOver()
                 children = {
                     titleLabel,
                     UI.Label {
-                        text = string.format("波次: %d/%d  |  建塔: %d  |  击杀: %d",
-                            GS.currentWave, 20, #GS.towers, GS.monstersKilled),
+                        text = string.format("抵达第 %d 波 (大%d·%d)  |  建塔: %d  |  击杀: %d",
+                            GS.globalWave, GS.bigWave, GS.smallWave, #GS.towers, GS.monstersKilled),
                         fontSize = 16, fontColor = CLR.secondary,
                     },
                     UI.Label {
@@ -1756,72 +1756,6 @@ function M.ShowGameOver()
             [1]   = { scale = 1.0, opacity = 1 },
         },
         duration = 0.6,
-        easing = "easeOutBack",
-        fillMode = "forwards",
-        delay = 0.2,
-    })
-end
-
-function M.ShowVictory()
-    local titleLabel = UI.Label {
-        text = "胜利!", fontSize = 36,
-        fontColor = CLR.success,
-    }
-    local overlay = UI.Panel {
-        width = "100%", height = "100%",
-        justifyContent = "center", alignItems = "center",
-        backgroundColor = { 0, 0, 0, 0 },
-        opacity = 0,
-        children = {
-            UI.Panel {
-                flexDirection = "column", alignItems = "center", gap = 14,
-                backgroundColor = { 10, 30, 10, 220 },
-                borderRadius = 14, paddingX = 44, paddingY = 34,
-                borderWidth = 1, borderColor = { 40, 180, 40, 120 },
-                boxShadow = {{ x = 0, y = 4, blur = 24, spread = 0, color = { 0, 255, 0, 40 } }},
-                children = {
-                    titleLabel,
-                    UI.Label {
-                        text = string.format("全部 20 波通关!  |  防御塔: %d  |  金币: %d",
-                            #GS.towers, GS.gold),
-                        fontSize = 16, fontColor = { 200, 255, 200, 220 },
-                    },
-                    UI.Label {
-                        text = "恭喜指挥官!",
-                        fontSize = 14, fontColor = CLR.gold,
-                    },
-                    UI.Button {
-                        text = "再来一局", variant = "primary",
-                        width = 160, height = 42, fontSize = 18,
-                        onClick = function()
-                            M.Shutdown()
-                            Start()
-                        end,
-                    },
-                },
-            },
-        },
-    }
-    UI.SetRoot(overlay)
-
-    -- 淡入动画
-    overlay:Animate({
-        keyframes = {
-            [0] = { opacity = 0 },
-            [1] = { opacity = 1 },
-        },
-        duration = 0.5,
-        easing = "easeOut",
-        fillMode = "forwards",
-    })
-    -- 标题脉冲
-    titleLabel:Animate({
-        keyframes = {
-            [0]   = { scale = 0.7, opacity = 0 },
-            [0.6] = { scale = 1.15 },
-            [1]   = { scale = 1.0, opacity = 1 },
-        },
-        duration = 0.7,
         easing = "easeOutBack",
         fillMode = "forwards",
         delay = 0.2,

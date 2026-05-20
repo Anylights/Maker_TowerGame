@@ -8,6 +8,7 @@ local GS = Cfg.GS
 local Utils = require("Utils")
 local EnergyTower = require("EnergyTower")
 local StatusEffect = require("StatusEffect")
+local Wave -- lazy require to avoid circular dependency
 
 local M = {}
 
@@ -16,8 +17,7 @@ local M = {}
 -- ============================================================================
 local UFO_MODELS = { "enemy-ufo-a", "enemy-ufo-b", "enemy-ufo-c", "enemy-ufo-d" }
 
--- HP 每波增长系数 (base_hp × HP_GROWTH^(wave-1))
-local HP_GROWTH = 1.13
+-- HP 缩放: 使用 Wave.HPScaleFactor() (抛物线缩放, 见 Wave.lua)
 
 -- ============================================================================
 -- 怪物类型定义 (对齐 enemies.json)
@@ -184,13 +184,17 @@ end
 -- ============================================================================
 
 --- @param monsterType string 怪物 ID (walker/swarm/shellbeast/sprinter/shielded/energy_devourer/shatter_titan/line_devourer)
---- @param opts table|nil { path = {{x,z},...}, waveNumber = int, eliteAffixes = {"thick_armor",...} }
+--- @param opts table|nil { spawnX, spawnZ, waveNumber, eliteAffixes }
 function M.SpawnMonster(monsterType, opts)
+    -- Lazy require Wave to avoid circular dependency
+    if not Wave then Wave = require("Wave") end
+
     monsterType = monsterType or "walker"
     opts = opts or {}
     local waveNumber = opts.waveNumber or 1
     local eliteAffixes = opts.eliteAffixes or {}
-    local path = opts.path or nil
+    local spawnX = opts.spawnX
+    local spawnZ = opts.spawnZ
 
     local typeDef = GetTypeDef(monsterType)
 
@@ -200,8 +204,10 @@ function M.SpawnMonster(monsterType, opts)
     local armorRatio = typeDef.armor_ratio or 0
     local shieldHp = typeDef.shield_hp or 0
 
-    -- === HP 波次缩放 (Boss 也缩放，但起始已很高) ===
-    hp = hp * math.pow(HP_GROWTH, waveNumber - 1)
+    -- === HP 波次缩放 (抛物线公式) ===
+    local isBoss = typeDef.is_boss or false
+    local scaleFactor = Wave.HPScaleFactor(waveNumber, isBoss)
+    hp = hp * scaleFactor
 
     -- === 精英词缀 ===
     local isElite = #eliteAffixes > 0
@@ -223,17 +229,17 @@ function M.SpawnMonster(monsterType, opts)
     armorRatio = math.min(armorRatio, 0.9)
     -- 护盾也随波次缩放
     if shieldHp > 0 then
-        shieldHp = shieldHp * math.pow(HP_GROWTH, waveNumber - 1)
+        shieldHp = shieldHp * scaleFactor
     end
 
     hp = math.floor(hp + 0.5)
     shieldHp = math.floor(shieldHp + 0.5)
 
-    -- === 出生位置 ===
+    -- === 出生位置 (径向刷新) ===
     local sx, sz
-    if path and #path >= 1 then
-        sx = path[1].x
-        sz = path[1].z
+    if spawnX and spawnZ then
+        sx = spawnX
+        sz = spawnZ
     else
         -- 兜底: 随机角度
         local angle = math.random() * math.pi * 2
@@ -247,18 +253,15 @@ function M.SpawnMonster(monsterType, opts)
     local s = typeDef.size
     -- 精英/Boss 略微放大
     if isElite then s = s * 1.2 end
-    if typeDef.is_boss then s = s * 1.0 end -- Boss 尺寸已在 typeDef 中定义
 
     node.position = Vector3(sx, 0, sz)
     node.scale = Vector3(s, s, s)
 
-    -- 朝向下一个路径点
-    if path and #path >= 2 then
-        local dx = path[2].x - path[1].x
-        local dz = path[2].z - path[1].z
-        local yaw = math.deg(math.atan(dx, dz))
-        node.rotation = Quaternion(yaw, Vector3.UP)
-    end
+    -- 朝向能源塔中心
+    local dx = 0 - sx
+    local dz = 0 - sz
+    local yaw = math.deg(math.atan(dx, dz))
+    node.rotation = Quaternion(yaw, Vector3.UP)
 
     -- === 模型 ===
     local ufoName = UFO_MODELS[math.random(1, #UFO_MODELS)]
@@ -280,19 +283,11 @@ function M.SpawnMonster(monsterType, opts)
     model:SetMaterial(mat)
     model.castShadows = true
 
-    -- 移动方向 (初始)
-    local dir
-    if path and #path >= 2 then
-        local dx = path[2].x - sx
-        local dz = path[2].z - sz
-        local len = math.sqrt(dx * dx + dz * dz)
-        dir = len > 0.01 and Vector3(dx / len, 0, dz / len) or Vector3(0, 0, 1)
-    else
-        local dx = 0 - sx
-        local dz = 0 - sz
-        local len = math.sqrt(dx * dx + dz * dz)
-        dir = len > 0.01 and Vector3(dx / len, 0, dz / len) or Vector3(0, 0, 1)
-    end
+    -- 移动方向 (初始: 朝向能源塔中心)
+    local dirDx = 0 - sx
+    local dirDz = 0 - sz
+    local dirLen = math.sqrt(dirDx * dirDx + dirDz * dirDz)
+    local dir = dirLen > 0.01 and Vector3(dirDx / dirLen, 0, dirDz / dirLen) or Vector3(0, 0, 1)
 
     -- 血条
     local hpBg, hpFill, fillMat = Utils.CreateHealthBar(node)
@@ -336,9 +331,6 @@ function M.SpawnMonster(monsterType, opts)
         goldDrop = typeDef.reward_gold or 0,
         energyDrop = typeDef.reward_energy or 0,
         materialDrop = typeDef.reward_material or 0,
-        -- 路径
-        path = path,
-        pathIndex = 1, -- 已到达 path[1]，正在前往 path[2]
         -- 精英
         isElite = isElite,
         eliteAffixes = eliteAffixes,
@@ -374,7 +366,68 @@ function M.SpawnMonster(monsterType, opts)
 end
 
 -- ============================================================================
--- 怪物移动 (路径点寻路)
+-- 转向避障
+-- ============================================================================
+
+--- 计算避障推力 (检测前方障碍物)
+--- @param pos Vector3 当前位置
+--- @param dir Vector3 当前移动方向 (归一化)
+--- @return number pushX, number pushZ 推力分量
+local function CalculateSteering(pos, dir)
+    local lookAhead = CONFIG.SteerLookAhead
+    local avoidR = CONFIG.SteerAvoidRadius
+    local pushForce = CONFIG.SteerPushForce
+
+    -- 前视位置
+    local aheadX = pos.x + dir.x * lookAhead
+    local aheadZ = pos.z + dir.z * lookAhead
+    local pushX, pushZ = 0, 0
+
+    -- 检测塔
+    for _, t in ipairs(GS.towers) do
+        if t.node then
+            local tp = t.node.position
+            local ddx = aheadX - tp.x
+            local ddz = aheadZ - tp.z
+            local dist = math.sqrt(ddx * ddx + ddz * ddz)
+            if dist < avoidR then
+                local factor = pushForce * (1.0 - dist / avoidR)
+                if dist > 0.01 then
+                    pushX = pushX + (ddx / dist) * factor
+                    pushZ = pushZ + (ddz / dist) * factor
+                else
+                    pushX = pushX + (math.random() - 0.5) * factor
+                    pushZ = pushZ + (math.random() - 0.5) * factor
+                end
+            end
+        end
+    end
+
+    -- 检测场景物件
+    for _, obj in ipairs(GS.terrainObjects) do
+        if obj.node then
+            local op = obj.node.position
+            local ddx = aheadX - op.x
+            local ddz = aheadZ - op.z
+            local dist = math.sqrt(ddx * ddx + ddz * ddz)
+            if dist < avoidR then
+                local factor = pushForce * (1.0 - dist / avoidR)
+                if dist > 0.01 then
+                    pushX = pushX + (ddx / dist) * factor
+                    pushZ = pushZ + (ddz / dist) * factor
+                else
+                    pushX = pushX + (math.random() - 0.5) * factor
+                    pushZ = pushZ + (math.random() - 0.5) * factor
+                end
+            end
+        end
+    end
+
+    return pushX, pushZ
+end
+
+-- ============================================================================
+-- 怪物移动 (直线冲向中心 + 转向避障)
 -- ============================================================================
 
 function M.UpdateMonsters(dt)
@@ -388,53 +441,54 @@ function M.UpdateMonsters(dt)
             local speed = StatusEffect.GetEffectiveSpeed(m)
             local reachedEnd = false
 
-            if m.path and #m.path >= 2 then
-                -- === 路径点寻路 ===
-                local targetIdx = m.pathIndex + 1
-                if targetIdx > #m.path then
-                    -- 已到达终点 (能源塔)
-                    reachedEnd = true
-                else
-                    local target = m.path[targetIdx]
-                    local dx = target.x - pos.x
-                    local dz = target.z - pos.z
-                    local dist = math.sqrt(dx * dx + dz * dz)
+            -- 计算朝向能源塔中心的方向
+            local toDx = 0 - pos.x
+            local toDz = 0 - pos.z
+            local toDist = math.sqrt(toDx * toDx + toDz * toDz)
 
-                    if dist < 0.3 then
-                        -- 到达路径点，前进到下一个
-                        m.pathIndex = targetIdx
-                        -- 更新朝向
-                        local nextIdx = m.pathIndex + 1
-                        if nextIdx <= #m.path then
-                            local nx = m.path[nextIdx].x - pos.x
-                            local nz = m.path[nextIdx].z - pos.z
-                            local nlen = math.sqrt(nx * nx + nz * nz)
-                            if nlen > 0.01 then
-                                m.dir = Vector3(nx / nlen, 0, nz / nlen)
-                                local yaw = math.deg(math.atan(nx, nz))
-                                m.node.rotation = Quaternion(yaw, Vector3.UP)
-                            end
-                        else
-                            reachedEnd = true
-                        end
-                    else
-                        -- 向当前目标移动
-                        m.dir = Vector3(dx / dist, 0, dz / dist)
-                        pos.x = pos.x + m.dir.x * speed * dt
-                        pos.z = pos.z + m.dir.z * speed * dt
-                        m.node.position = pos
-                    end
-                end
+            if toDist < 1.0 then
+                reachedEnd = true
             else
-                -- === 无路径: 直线冲向中心 (兜底) ===
+                -- 归一化期望方向
+                local desiredX = toDx / toDist
+                local desiredZ = toDz / toDist
+
+                -- 转向避障
+                local pushX, pushZ = CalculateSteering(pos, m.dir)
+
+                -- 混合: 期望方向 + 推力
+                local finalX = desiredX + pushX
+                local finalZ = desiredZ + pushZ
+                local finalLen = math.sqrt(finalX * finalX + finalZ * finalZ)
+                if finalLen > 0.01 then
+                    finalX = finalX / finalLen
+                    finalZ = finalZ / finalLen
+                else
+                    finalX = desiredX
+                    finalZ = desiredZ
+                end
+
+                -- 平滑转向 (lerp)
+                local turnRate = 5.0 * dt
+                m.dir = Vector3(
+                    m.dir.x + (finalX - m.dir.x) * turnRate,
+                    0,
+                    m.dir.z + (finalZ - m.dir.z) * turnRate
+                )
+                -- 重新归一化
+                local dl = math.sqrt(m.dir.x * m.dir.x + m.dir.z * m.dir.z)
+                if dl > 0.01 then
+                    m.dir = Vector3(m.dir.x / dl, 0, m.dir.z / dl)
+                end
+
+                -- 移动
                 pos.x = pos.x + m.dir.x * speed * dt
                 pos.z = pos.z + m.dir.z * speed * dt
                 m.node.position = pos
 
-                local distToCenter = math.sqrt(pos.x * pos.x + pos.z * pos.z)
-                if distToCenter < 1.0 then
-                    reachedEnd = true
-                end
+                -- 更新朝向
+                local moveYaw = math.deg(math.atan(m.dir.x, m.dir.z))
+                m.node.rotation = Quaternion(moveYaw, Vector3.UP)
             end
 
             -- === Boss 特殊机制 ===
