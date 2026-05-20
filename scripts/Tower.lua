@@ -84,13 +84,18 @@ function M.PlaceBasicTower(gx, gz)
         cooldown = 0,
         weaponYaw = 0,
         targetYaw = nil,
+        activated = false,  -- 需要通过能源线连接才激活
     }
     -- 初始化圣器槽位
     Artifact.InitTowerSlots(tower)
     table.insert(GS.towers, tower)
 
-    EnergyTower.RecalculateEnergy()
+    -- 重新计算连通性 (新塔可能已经在已有线网上)
+    EnergyTower.RecalculateConnectivity()
     EnergyTower.RebuildEnergyLines()
+
+    -- 设置未激活视觉
+    M.UpdateTowerActivationVisual(tower)
 
     print(string.format("Tower built at (%d, %d), dist=%.1f, cost=%d, gold=%d",
         gx, gz, dist, cost, GS.gold))
@@ -102,8 +107,45 @@ end
 
 local ROTATE_SPEED = 720
 
+--- 更新塔的激活状态视觉
+function M.UpdateTowerActivationVisual(tower)
+    if not tower.node then return end
+    local weaponNode = tower.node:GetChild("TowerWeapon", false)
+    if not weaponNode then return end
+
+    local model = weaponNode:GetComponent("StaticModel")
+    if not model then return end
+
+    if tower.activated then
+        -- 恢复正常材质
+        model:SetMaterial(cache:GetResource("Material",
+            "Materials/TD/weapon-ballista_00_colormap.xml"))
+    else
+        -- 灰色半透明材质表示未激活
+        if not tower.inactiveMat then
+            tower.inactiveMat = Material:new()
+            tower.inactiveMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+            tower.inactiveMat:SetShaderParameter("MatDiffColor", Variant(Color(0.3, 0.3, 0.35, 1.0)))
+            tower.inactiveMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.0, 0.0, 0.0)))
+            tower.inactiveMat:SetShaderParameter("Metallic", Variant(0.0))
+            tower.inactiveMat:SetShaderParameter("Roughness", Variant(0.8))
+        end
+        model:SetMaterial(tower.inactiveMat)
+    end
+end
+
+--- 批量更新所有塔的激活视觉
+function M.UpdateAllActivationVisuals()
+    for _, tower in ipairs(GS.towers) do
+        M.UpdateTowerActivationVisual(tower)
+    end
+end
+
 function M.UpdateTowerAttacks(dt)
     for _, tower in ipairs(GS.towers) do
+        -- 未激活的塔不攻击
+        if not tower.activated then goto continue_tower end
+
         -- 平滑旋转
         if tower.targetYaw then
             local weaponNode = tower.node:GetChild("TowerWeapon", false)
@@ -161,6 +203,8 @@ function M.UpdateTowerAttacks(dt)
             speedMult = speedMult * (tower.artAtkSpdMult or 1.0)
             tower.cooldown = CONFIG.TowerFireInterval / math.max(0.10, speedMult)
         end
+
+        ::continue_tower::
     end
 end
 
@@ -293,6 +337,9 @@ function M.DemolishTower(towerIndex)
     local refund = math.floor(originalCost * ratio + 0.5)
     GS.gold = GS.gold + refund
 
+    -- 删除该塔所在格子的所有能源线边 (图模型)
+    EnergyTower.RemoveEdgesAtCell(tower.gx, tower.gz)
+
     -- 卸下该塔上的圣器 (归还背包)
     if tower.mainSlot then
         Artifact.UnequipFromTower(tower.mainSlot)
@@ -319,9 +366,12 @@ function M.DemolishTower(towerIndex)
         end
     end
 
-    -- 重新计算供能和线段
-    EnergyTower.RecalculateEnergy()
+    -- 重新计算连通性和线段
+    EnergyTower.RecalculateConnectivity()
     EnergyTower.RebuildEnergyLines()
+
+    -- 更新所有塔的激活视觉
+    M.UpdateAllActivationVisuals()
 
     print(string.format("[Tower] Demolished tower at (%d,%d) | Refund: %d gold (%.0f%%)",
         tower.gx, tower.gz, refund, ratio * 100))
@@ -379,8 +429,6 @@ function M.HandleGridHover()
     GS.hoverGX = gx
     GS.hoverGZ = gz
 
-    local dist = math.sqrt(gx * gx + gz * gz)
-    local inRange = dist <= EnergyTower.GetEnergyRange() + 0.01
     local isEnergyTower = (gx == 0 and gz == 0)
     local isOccupied = false
     for _, tower in ipairs(GS.towers) do
@@ -391,7 +439,8 @@ function M.HandleGridHover()
     end
     local canAfford = GS.gold >= M.GetTowerCost()
 
-    GS.hoverValid = inRange and not isEnergyTower and not isOccupied and canAfford
+    -- 不再要求在能源范围内，任何空地都可以建塔
+    GS.hoverValid = not isEnergyTower and not isOccupied and canAfford
 
     GS.hoverNode.enabled = true
     GS.hoverNode.position = Vector3(gx, CONFIG.HoverY, gz)

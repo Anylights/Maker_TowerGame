@@ -7,25 +7,36 @@ local M = {}
 -- ============================================================================
 -- 色调配置
 -- ============================================================================
+-- Thronefall 风格色板：高饱和度纯色块 + 暖冷对比
 M.MOEBIUS = {
-    EnergyDiff     = Color(0.95, 0.68, 0.15, 1),
-    EnergyEmit     = Color(0.50, 0.35, 0.08),
-    TowerDiff      = Color(0.45, 0.55, 0.72, 1),
-    TowerEmit      = Color(0.12, 0.18, 0.30),
-    MonsterDiff    = Color(0.85, 0.22, 0.18, 1),
-    MonsterEmit    = Color(0.35, 0.08, 0.05),
-    ProjectileDiff = Color(0.15, 0.80, 0.85, 1),
-    ProjectileEmit = Color(0.10, 0.45, 0.50),
-    GridColor      = Color(0.50, 0.42, 0.32, 0.30),
-    RangeColor     = Color(0.40, 0.60, 0.80, 0.35),
-    LootGoldDiff   = Color(1.0, 0.82, 0.20, 1),
-    LootGoldEmit   = Color(0.45, 0.35, 0.05),
-    LootEnergyDiff = Color(0.30, 0.55, 0.90, 1),
-    LootEnergyEmit = Color(0.15, 0.25, 0.50),
-    LootMaterialDiff = Color(0.40, 0.85, 0.45, 1),
-    LootMaterialEmit = Color(0.15, 0.40, 0.18),
-    LinesDiff      = Color(0.35, 0.70, 0.85, 0.85),
-    LinesEmit      = Color(0.25, 0.45, 0.65),
+    -- 能源塔：金琥珀色，温暖突出
+    EnergyDiff     = Color(0.95, 0.72, 0.18, 1),
+    EnergyEmit     = Color(0.55, 0.38, 0.10),
+    -- 防御塔：石灰蓝，冷静厚重
+    TowerDiff      = Color(0.50, 0.58, 0.68, 1),
+    TowerEmit      = Color(0.10, 0.14, 0.22),
+    -- 怪物：深红紫，威胁感强烈
+    MonsterDiff    = Color(0.82, 0.18, 0.22, 1),
+    MonsterEmit    = Color(0.40, 0.08, 0.10),
+    -- 炮弹：青色能量弹
+    ProjectileDiff = Color(0.20, 0.82, 0.85, 1),
+    ProjectileEmit = Color(0.12, 0.50, 0.55),
+    -- 网格线：暗褐色极低透明
+    GridColor      = Color(0.45, 0.38, 0.28, 0.22),
+    -- 范围圈
+    RangeColor     = Color(0.35, 0.55, 0.75, 0.30),
+    -- 掉落：金币-纯金
+    LootGoldDiff   = Color(1.0, 0.85, 0.22, 1),
+    LootGoldEmit   = Color(0.50, 0.38, 0.06),
+    -- 掉落：能源-深蓝
+    LootEnergyDiff = Color(0.25, 0.50, 0.90, 1),
+    LootEnergyEmit = Color(0.12, 0.22, 0.50),
+    -- 掉落：材料-翠绿
+    LootMaterialDiff = Color(0.35, 0.82, 0.40, 1),
+    LootMaterialEmit = Color(0.12, 0.38, 0.15),
+    -- 能源线：深青色
+    LinesDiff      = Color(0.30, 0.65, 0.80, 0.80),
+    LinesEmit      = Color(0.20, 0.40, 0.60),
 }
 
 -- ============================================================================
@@ -81,10 +92,13 @@ M.CONFIG = {
     EnergyTowerHPBarH = 0.12,
     EnergyTowerHPBarOffY = 1.8,
     MonsterDmgToTower = 20,
-    -- 能源线伤害
-    LineDmgCoeff = 0.35,           -- line_dps = P_line * 0.35 * convEff
+    -- 能源线伤害 (电路模型)
+    CircuitDmgCoeff = 8.0,         -- DPS = current × coeff × convEff
     LineHitRadius = 0.5,           -- 怪物到线段距离 < 0.5m 命中
-    LineMultiDecay = { 1.00, 0.75, 0.55, 0.40, 0.30, 0.22, 0.16 }, -- 多线叠加递减
+    ShortCircuitDmgPerSec = 5.0,   -- 短路每秒扣血 (占总功率百分比)
+    -- 布线系统
+    LineCostPerSegment = 5,        -- 每段能源线花费金币
+    LineRefundRatio = 0.50,        -- 回收返还比例 50%
     -- 经济
     InitialGold = 300,
     InitialMaterial = 0,
@@ -176,13 +190,35 @@ M.GS = {
     hoverValid = false,
     hoverOnMap = false,
 
-    -- 能源线
+    -- 能源网络 (统一图模型)
+    energyGraph = {
+        nodes = {},        -- nodeKey("x,z") → { x=gx, z=gz, edges={edgeKey,...} }
+        edges = {},        -- edgeKey → { x1,z1, x2,z2, isHoriz }
+        edgeCount = 0,     -- 边总数
+    },
+    energyNetwork = {
+        parent = {},       -- Union-Find: nodeKey → nodeKey
+        rank = {},         -- Union-Find: nodeKey → rank
+        hasCycle = false,  -- 是否存在环路 (短路)
+        spanTree = {},     -- BFS生成树: nodeKey → { parentKey, childKeys={...} }
+        edgePower = {},    -- edgeKey → 该边上的功率
+        nodePower = {},    -- nodeKey → 到达该节点的功率
+    },
+    shortCircuit = {
+        active = false,    -- 是否短路中
+        dmgAccum = 0,      -- 短路伤害累积
+    },
+    wiringMode = false,    -- 是否处于布线模式
+    wiringStart = nil,     -- 拖拽画线起点 {gx, gz} 或 nil
+    wiringPreviewNodes = {},-- 预览线段节点列表
+    wiringHintMsg = nil,   -- 布线失败提示信息 (临时)
+    wiringHintTimer = 0,   -- 提示信息倒计时
+
     linesNode = nil,
     lineMat = nil,
     linePulseTime = 0,
     pulsesNode = nil,
     pulses = {},
-    lineSegments = {}, -- { {ax,az, bx,bz, linePwr}, ... } 用于线伤碰撞
 
     -- 能源塔血条
     etHPBg = nil,

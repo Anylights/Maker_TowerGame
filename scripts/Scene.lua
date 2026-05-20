@@ -23,17 +23,59 @@ local pathMarkersParent_ = nil
 local spawnMarkerNodes_ = {}
 
 -- ============================================================================
--- 辅助：递归调暗灯光
+-- Thronefall 风格光照方案
+-- 高饱和度彩色阴影 + 低多边形色块感 + 统一色调板
 -- ============================================================================
 
-local function DimAllLights(node, factor)
-    local light = node:GetComponent("Light")
-    if light then
-        light.brightness = light.brightness * factor
-    end
-    for i = 0, node:GetNumChildren(false) - 1 do
-        DimAllLights(node:GetChild(i), factor)
-    end
+--- 创建 Thronefall 风格的场景光照
+local function SetupThronefallLighting()
+    -- ---- Zone（全局环境光 + 雾）----
+    local zoneNode = GS.scene:CreateChild("Zone")
+    local zone = zoneNode:CreateComponent("Zone")
+    zone.boundingBox = BoundingBox(Vector3(-500, -500, -500), Vector3(500, 500, 500))
+
+    -- 环境色：暗青绿，阴影深但带色调（Thronefall 标志性彩色阴影）
+    zone.ambientColor = Color(0.05, 0.10, 0.12)
+
+    -- 雾色：偏暖的低饱和色，远处地面融入天空
+    zone.fogColor = Color(0.55, 0.65, 0.60)
+    zone.fogStart = 60.0
+    zone.fogEnd = 180.0
+
+    -- ---- 主方向光（太阳）----
+    local sunNode = GS.scene:CreateChild("Sun")
+    sunNode.direction = Vector3(0.5, -0.8, 0.6)
+    local sun = sunNode:CreateComponent("Light")
+    sun.lightType = LIGHT_DIRECTIONAL
+    -- 偏暖的阳光，但不过亮，制造与冷色阴影的对比
+    sun.color = Color(1.0, 0.88, 0.72)
+    sun.brightness = 1.2
+    sun.castShadows = true
+    sun.shadowBias = BiasParameters(0.00025, 0.5)
+    sun.shadowCascade = CascadeParameters(10.0, 40.0, 150.0, 0.0, 0.8)
+    -- shadowIntensity = 阴影中残留光照比例，0.0 = 全黑（最深）
+    sun.shadowIntensity = 0.0
+    sun.specularIntensity = 0.0  -- 完全关闭高光，纯哑光卡通感
+
+    -- ---- 补光（天光，从上方填充，偏冷蓝）----
+    local fillNode = GS.scene:CreateChild("FillLight")
+    fillNode.direction = Vector3(-0.3, -1.0, -0.2)
+    local fill = fillNode:CreateComponent("Light")
+    fill.lightType = LIGHT_DIRECTIONAL
+    fill.color = Color(0.35, 0.45, 0.60)  -- 冷蓝补光
+    fill.brightness = 0.15
+    fill.castShadows = false
+    fill.specularIntensity = 0.0  -- 补光不产生高光
+
+    -- ---- 渲染器设置 ----
+    renderer:SetDrawShadows(true)
+    renderer:SetShadowQuality(SHADOWQUALITY_PCF_24BIT)
+    renderer:SetShadowMapSize(2048)
+    renderer:SetSpecularLighting(false)  -- 全局关闭镜面反射，消除塑料感
+
+    -- 保存引用，供后续动态调色使用
+    GS.zone = zone
+    GS.sunLight = sun
 end
 
 -- ============================================================================
@@ -45,11 +87,8 @@ function M.CreateScene()
     GS.scene:CreateComponent("Octree")
     GS.scene:CreateComponent("DebugRenderer")
 
-    -- 光照
-    local lgFile = cache:GetResource("XMLFile", "LightGroup/Daytime.xml")
-    local lg = GS.scene:CreateChild("LightGroup")
-    lg:LoadXML(lgFile:GetRoot())
-    DimAllLights(lg, 0.4)
+    -- Thronefall 风格光照
+    SetupThronefallLighting()
 
     -- 地面
     M.CreateTileFloor()

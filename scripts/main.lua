@@ -128,12 +128,16 @@ function HandleUpdate(eventType, eventData)
         Tower.HandleGridHover()
     end
 
-    -- 圣器输入 (B键面板, 数字键装备, 掉落选择, 塔详情 toggle)
+    -- 圣器输入 (E键布线切换, B键面板, 数字键装备, 掉落选择, 塔详情 toggle)
     GameUI.HandleArtifactInput()
 
-    -- 建塔/拆塔 (掉落选择期间屏蔽)
+    -- 布线模式 vs 建塔/拆塔 (掉落选择期间屏蔽)
     if not GS.artifactDropPending then
-        Tower.HandlePlacement()
+        if GS.wiringMode then
+            EnergyTower.HandleWiringInput()
+        else
+            Tower.HandlePlacement()
+        end
     end
 
     -- 波次调度
@@ -147,6 +151,9 @@ function HandleUpdate(eventType, eventData)
 
     -- 能源线伤害
     EnergyTower.UpdateLineDamage(dt)
+
+    -- 短路持续扣血
+    EnergyTower.UpdateShortCircuitDamage(dt)
 
     -- 塔攻击 & 炮弹
     Tower.UpdateTowerAttacks(dt)

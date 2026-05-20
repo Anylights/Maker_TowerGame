@@ -27,6 +27,9 @@ local waveLabel_ = nil
 local powerLabel_ = nil
 local previewLabel_ = nil
 
+-- 布线按钮
+local wiringBtn_ = nil
+
 -- 速度按钮
 local speedBtn1_ = nil
 local speedBtn2_ = nil
@@ -297,6 +300,15 @@ function M.CreateGameUI()
         },
     }
 
+    -- 布线按钮
+    wiringBtn_ = UI.Button {
+        text = "Wire [E]", width = 72, height = 28, fontSize = 12,
+        onClick = function()
+            local EnergyTower = require("EnergyTower")
+            EnergyTower.ToggleWiringMode()
+        end,
+    }
+
     -- 升级面板
     upgradeLevelLabel_ = UI.Label {
         text = "", fontSize = 16,
@@ -350,7 +362,7 @@ function M.CreateGameUI()
                         flexDirection = "column", gap = 3,
                         backgroundColor = { 0, 0, 0, 140 },
                         borderRadius = 6, paddingX = 12, paddingY = 8,
-                        children = { goldLabel_, materialLabel_, energyLabel_, costLabel_ },
+                        children = { goldLabel_, materialLabel_, energyLabel_, costLabel_, wiringBtn_ },
                     },
                     UI.Panel {
                         flexDirection = "column", gap = 3,
@@ -992,24 +1004,29 @@ function M.RefreshUI()
 
     if powerLabel_ then
         local n = #GS.towers
+        local totalP = EnergyTower.GetTotalPower()
         if n == 0 then
-            local totalP = EnergyTower.GetTotalPower()
             powerLabel_:SetText(string.format("P_total: %d | Idle", totalP))
         else
-            local totalP = EnergyTower.GetTotalPower()
-            local sumDel = 0
-            local sumLine = 0
-            for _, t in ipairs(GS.towers) do
-                sumDel = sumDel + t.delivered
-                sumLine = sumLine + t.linePwr
-            end
+            -- 统计边数和总 DPS (图模型)
             local convEff = EnergyTower.GetConvEff()
-            local lineDps = sumLine * CONFIG.LineDmgCoeff * convEff
+            local numEdges = GS.energyGraph.edgeCount
+            local totalDps = 0
+            for ek, pwr in pairs(GS.energyNetwork.edgePower) do
+                totalDps = totalDps + pwr * CONFIG.CircuitDmgCoeff * convEff
+            end
+            local scStr = GS.shortCircuit.active and " | SHORT!" or ""
             powerLabel_:SetText(string.format(
-                "P: %d = Del %.0f + Line %.0f | DPS: %.1f",
-                totalP, sumDel, sumLine, lineDps
+                "P: %d | E: %d | DPS: %.1f%s",
+                totalP, numEdges, totalDps, scStr
             ))
         end
+    end
+
+    -- 布线按钮高亮
+    if wiringBtn_ then
+        wiringBtn_:SetVariant(GS.wiringMode and "primary" or "default")
+        wiringBtn_:SetText(GS.wiringMode and "Wire ON [E]" or "Wire [E]")
     end
 
     -- 速度按钮高亮
@@ -1082,14 +1099,21 @@ function M.UpdateHintLabel()
     local Tower = require("Tower")
     local EnergyTower = require("EnergyTower")
 
+    if GS.wiringMode then
+        local base = "WIRING: LDrag draw | RClick remove | E exit | " .. CONFIG.LineCostPerSegment .. "g/seg"
+        if GS.wiringHintMsg then
+            base = base .. "  |  " .. GS.wiringHintMsg
+        end
+        hintLabel_:SetText(base)
+        return
+    end
+
     if not GS.hoverOnMap then
-        hintLabel_:SetText("LClick: Build | Click Tower: Detail | X: Sell | U: Upgrade | B: Bag | Tab: Speed | MMB: Pan")
+        hintLabel_:SetText("LClick: Build | Click Tower: Detail | X: Sell | U: Upgrade | E: Wire | B: Bag | Tab: Speed | MMB: Pan")
         return
     end
 
     local gx, gz = GS.hoverGX, GS.hoverGZ
-    local dist = math.sqrt(gx * gx + gz * gz)
-    local inRange = dist <= EnergyTower.GetEnergyRange() + 0.01
     local isEnergyTower = (gx == 0 and gz == 0)
     local isOccupied = false
     for _, tower in ipairs(GS.towers) do
@@ -1133,38 +1157,13 @@ function M.UpdateHintLabel()
                 break
             end
         end
-    elseif not inRange then
-        hintLabel_:SetText("Out of energy range!")
     elseif not canAfford then
         hintLabel_:SetText("Not enough gold! Need: " .. Tower.GetTowerCost())
     else
-        local att = EnergyTower.CalcAttenuation(dist)
-        local dmg = CONFIG.TowerBaseDmg * att
-        local n = #GS.towers
-        local totalP = EnergyTower.GetTotalPower()
-        local newN = n + 1
-        local newShare = totalP / newN
-        local newDel = newShare * att
-        local newRatio = newDel / totalP
-        local newLinePwr = newShare - newDel
-        local curLinePwrSum = 0
-        for _, t in ipairs(GS.towers) do
-            curLinePwrSum = curLinePwrSum + t.linePwr
-        end
-        local convEff = EnergyTower.GetConvEff()
-        local curLineDps = curLinePwrSum * CONFIG.LineDmgCoeff * convEff
-        local newTotalLine = 0
-        for _, t in ipairs(GS.towers) do
-            local tAtt = EnergyTower.CalcAttenuation(t.dist)
-            local tDel = newShare * tAtt
-            newTotalLine = newTotalLine + (newShare - tDel)
-        end
-        newTotalLine = newTotalLine + newLinePwr
-        local newLineDps = newTotalLine * CONFIG.LineDmgCoeff * convEff
-        local dpsDelta = newLineDps - curLineDps
+        -- 新塔尚未连线，显示建造成本和提示
         hintLabel_:SetText(string.format(
-            "Build | Cost: %d | Pwr: %.0f%% | Dmg: %.1f | LineDPS: %+.1f",
-            Tower.GetTowerCost(), newRatio * 100, dmg, dpsDelta
+            "Build | Cost: %d | Need wiring to activate",
+            Tower.GetTowerCost()
         ))
     end
 end
@@ -1405,6 +1404,13 @@ end
 -- ============================================================================
 
 function M.HandleArtifactInput()
+    -- E 键切换布线模式
+    if input:GetKeyPress(KEY_E) then
+        local EnergyTower = require("EnergyTower")
+        EnergyTower.ToggleWiringMode()
+        return
+    end
+
     -- B 键切换背包面板
     if input:GetKeyPress(KEY_B) then
         M.ToggleArtifactPanel()
