@@ -88,8 +88,8 @@ M.CONFIG = {
     TotalPower = 100,
     EnergyRange = 7,
     EnergyTowerHP = 100,
-    EnergyTowerHPBarW = 1.4,
-    EnergyTowerHPBarH = 0.12,
+    EnergyTowerHPBarW = 2.0,
+    EnergyTowerHPBarH = 0.18,
     EnergyTowerHPBarOffY = 1.8,
     MonsterDmgToTower = 20,
     -- 能源线伤害 (电路模型)

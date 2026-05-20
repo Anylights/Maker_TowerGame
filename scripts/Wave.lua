@@ -441,18 +441,18 @@ function M.GetWaveInfo()
 
     if phase == "preparing" then
         local waveName = M.GetWaveName()
-        return string.format("Wave %d/%d \"%s\" | %.0fs (SPACE skip)",
+        return string.format("第 %d/%d 波 「%s」 | %.0f秒 (空格跳过)",
             wave, M.TOTAL_WAVES, waveName, math.max(0, GS.waveTimer))
     elseif phase == "spawning" then
-        return string.format("Wave %d/%d | Spawning %d/%d",
+        return string.format("第 %d/%d 波 | 出怪中 %d/%d",
             wave, M.TOTAL_WAVES, spawnedMonstersInWave_, totalMonstersInWave_)
     elseif phase == "clearing" then
-        return string.format("Wave %d/%d | Clearing (%d left)",
+        return string.format("第 %d/%d 波 | 清剿中 (剩余 %d)",
             wave, M.TOTAL_WAVES, #GS.monsters)
     elseif phase == "victory" then
-        return "VICTORY! All 20 waves cleared!"
+        return "胜利！全部 20 波已通关！"
     else
-        return string.format("Wave %d/%d", wave, M.TOTAL_WAVES)
+        return string.format("第 %d/%d 波", wave, M.TOTAL_WAVES)
     end
 end
 

@@ -361,24 +361,43 @@ function M.PlaceEnergyTower()
     GS.etHPBg = GS.scene:CreateChild("EnergyTowerHPBar")
     GS.etHPBg.position = Vector3(0, 4.6, 0)
 
+    local barW = CONFIG.EnergyTowerHPBarW
+    local barH = CONFIG.EnergyTowerHPBarH
+
+    -- 外框（白色亮边，略大于背景）
+    local frame = GS.etHPBg:CreateChild("ETHPFrame")
+    frame.scale = Vector3(barW + 0.08, barH + 0.06, 0.008)
+    local frameModel = frame:CreateComponent("StaticModel")
+    frameModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
+    local frameMat = Material:new()
+    frameMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+    frameMat:SetShaderParameter("MatDiffColor", Variant(Color(0.9, 0.95, 1.0, 1.0)))
+    frameMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 0.7, 0.8)))
+    frameMat:SetShaderParameter("Metallic", Variant(0.3))
+    frameMat:SetShaderParameter("Roughness", Variant(0.4))
+    frameModel:SetMaterial(frameMat)
+
+    -- 黑色背景
     local bg = GS.etHPBg:CreateChild("ETHPBg")
-    bg.scale = Vector3(CONFIG.EnergyTowerHPBarW, CONFIG.EnergyTowerHPBarH, 0.01)
+    bg.scale = Vector3(barW, barH, 0.01)
+    bg.position = Vector3(0, 0, 0.002)
     local bgModel = bg:CreateComponent("StaticModel")
     bgModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
     bgModel:SetMaterial(Utils.GetHPBgMaterial())
 
+    -- 填充条（更亮的绿色 + 更强发光）
     GS.etHPFill = GS.etHPBg:CreateChild("ETHPFill")
-    GS.etHPFill.scale = Vector3(CONFIG.EnergyTowerHPBarW, CONFIG.EnergyTowerHPBarH * 0.75, 0.015)
-    GS.etHPFill.position = Vector3(0, 0, 0.005)
+    GS.etHPFill.scale = Vector3(barW * 0.98, barH * 0.7, 0.015)
+    GS.etHPFill.position = Vector3(0, 0, 0.006)
     local fillModel = GS.etHPFill:CreateComponent("StaticModel")
     fillModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
 
     GS.etFillMat = Material:new()
     GS.etFillMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.1, 0.9, 0.1, 1.0)))
-    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.05, 0.4, 0.05)))
+    GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.15, 1.0, 0.15, 1.0)))
+    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.1, 0.8, 0.1)))
     GS.etFillMat:SetShaderParameter("Metallic", Variant(0.0))
-    GS.etFillMat:SetShaderParameter("Roughness", Variant(0.5))
+    GS.etFillMat:SetShaderParameter("Roughness", Variant(0.4))
     fillModel:SetMaterial(GS.etFillMat)
 end
 
@@ -391,22 +410,22 @@ function M.UpdateEnergyTowerHP()
     GS.etHPBg.rotation = GS.cameraNode.rotation
 
     local ratio = math.max(0, GS.etHP / GS.etMaxHP)
-    local fullW = CONFIG.EnergyTowerHPBarW
+    local fullW = CONFIG.EnergyTowerHPBarW * 0.98
     local fillW = fullW * ratio
-    GS.etHPFill.scale = Vector3(fillW, CONFIG.EnergyTowerHPBarH * 0.75, 0.015)
+    GS.etHPFill.scale = Vector3(fillW, CONFIG.EnergyTowerHPBarH * 0.7, 0.015)
     local offset = (fullW - fillW) * 0.5
-    GS.etHPFill.position = Vector3(-offset, 0, 0.005)
+    GS.etHPFill.position = Vector3(-offset, 0, 0.006)
 
     local r, g
     if ratio > 0.5 then
         r = (1.0 - ratio) * 2.0
-        g = 0.9
+        g = 1.0
     else
-        r = 0.9
+        r = 1.0
         g = ratio * 2.0
     end
     GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(r, g, 0.1, 1.0)))
-    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(r * 0.3, g * 0.3, 0.02)))
+    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(r * 0.5, g * 0.5, 0.03)))
 end
 
 -- ============================================================================
@@ -1426,6 +1445,13 @@ local function PointToSegmentDist(px, pz, ax, az, bx, bz)
     return math.sqrt(ex * ex + ez * ez)
 end
 
+-- 能源线伤害专用颜色（青蓝色，区别于塔伤的黄色）
+local LINE_DMG_COLOR = Color(0.3, 0.9, 1.0, 1.0)
+local LINE_DMG_STROKE = Color(0.0, 0.15, 0.3, 0.9)
+-- 每只怪的伤害累积 & 冷却计时器（最小结算间隔 0.5 秒）
+local LINE_DMG_INTERVAL = 0.5
+local lineDmgAccum_ = {}  -- id → { dmg=累积伤害, cd=冷却剩余 }
+
 function M.UpdateLineDamage(dt)
     local graph = GS.energyGraph
     local net = GS.energyNetwork
@@ -1453,10 +1479,10 @@ function M.UpdateLineDamage(dt)
                 if edgePwr and edgePwr > 0 then
                     local d = PointToSegmentDist(mx, mz, edge.x1, edge.z1, edge.x2, edge.z2)
                     if d < hitRadius then
-                        -- DPS = edgePower / pathLen × dmgCoeff × convEff
-                        -- 简化: 使用 edgePower 作为 current 的替代
-                        local current = edgePwr / math.max(1, graph.edgeCount)
-                        totalDps = totalDps + current * dmgCoeff * convEff
+                        -- DPS = edgePower × dmgCoeff × convEff × 0.05
+                        -- edgePower 已是该边分配的功率; ×0.05 归一化到合理 DPS
+                        -- Lv1 单边 edgePwr≈50 → 50×8×1×0.05 = 20 DPS
+                        totalDps = totalDps + edgePwr * dmgCoeff * convEff * 0.05
                     end
                 end
             end
@@ -1473,13 +1499,42 @@ function M.UpdateLineDamage(dt)
                     totalDps = totalDps * (1.0 - m.lineDmgReduction)
                 end
 
-                local dmg = totalDps * dt
-                if dmg >= 0.5 then
-                    Monster.DamageMonster(m, math.floor(dmg + 0.5), true)
+                -- 累积伤害，每 0.5 秒结算一次
+                local id = tostring(m.node:GetID())
+                local acc = lineDmgAccum_[id]
+                if not acc then
+                    acc = { dmg = 0, cd = 0 }
+                    lineDmgAccum_[id] = acc
+                end
+
+                acc.dmg = acc.dmg + totalDps * dt
+                acc.cd  = acc.cd  - dt
+
+                if acc.cd <= 0 and acc.dmg >= 1.0 then
+                    local dmg = math.floor(acc.dmg)
+                    acc.dmg = acc.dmg - dmg
+                    acc.cd  = LINE_DMG_INTERVAL
+                    -- 用青蓝色显示能源线伤害，跳过 DamageMonster 内部的黄色文字
+                    Utils.SpawnDmgText(m.node.position, dmg, LINE_DMG_COLOR, LINE_DMG_STROKE)
+                    Monster.DamageMonster(m, dmg, true, true)
                 end
             end
 
             ::continue_monster::
+        end
+    end
+
+    -- 清理已死亡怪物的累积器
+    for id in pairs(lineDmgAccum_) do
+        local found = false
+        for _, m in ipairs(GS.monsters) do
+            if m.node and tostring(m.node:GetID()) == id and m.hp > 0 then
+                found = true
+                break
+            end
+        end
+        if not found then
+            lineDmgAccum_[id] = nil
         end
     end
 end

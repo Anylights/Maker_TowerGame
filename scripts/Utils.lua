@@ -143,19 +143,24 @@ end
 -- 浮动伤害数字
 -- ============================================================================
 
-function M.SpawnDmgText(pos, dmg)
+--- 生成浮动伤害数字
+---@param pos Vector3
+---@param dmg number
+---@param color? Color 自定义颜色（默认黄色）
+---@param strokeColor? Color 自定义描边（默认黑色）
+function M.SpawnDmgText(pos, dmg, color, strokeColor)
     local node = GS.scene:CreateChild("DmgText")
     node.position = Vector3(pos.x, pos.y + 0.5, pos.z)
 
     local text3d = node:CreateComponent("Text3D")
     text3d:SetFont("Fonts/MiSans-Regular.ttf", 28)
     text3d:SetText(string.format("-%.0f", dmg))
-    text3d:SetColor(Color(1.0, 0.95, 0.2, 1.0))
+    text3d:SetColor(color or Color(1.0, 0.95, 0.2, 1.0))
     text3d:SetAlignment(HA_CENTER, VA_CENTER)
     text3d:SetFaceCameraMode(FC_ROTATE_XYZ)
     text3d:SetTextEffect(TE_STROKE)
     text3d:SetEffectStrokeThickness(2)
-    text3d:SetEffectColor(Color(0, 0, 0, 0.8))
+    text3d:SetEffectColor(strokeColor or Color(0, 0, 0, 0.8))
     text3d.fixedScreenSize = true
 
     local entry = { node = node, text3d = text3d, timer = 0, maxTime = 0.8 }

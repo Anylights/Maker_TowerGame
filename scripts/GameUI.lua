@@ -14,6 +14,37 @@ local Artifact = require("Artifact")
 local M = {}
 
 -- ============================================================================
+-- 颜色层级系统 (CLR)
+-- ============================================================================
+
+local CLR = {
+    -- 信息层级
+    gold       = { 255, 215, 50, 255 },   -- 关键 (金币、标题)
+    energy     = { 80, 220, 255, 255 },    -- 能量主题 (青蓝)
+    success    = { 80, 240, 120, 255 },    -- 正面 (材料、满血)
+    danger     = { 255, 80, 80, 255 },     -- 警告 (不足、危险)
+    warning    = { 255, 180, 60, 255 },    -- 注意 (中等重要)
+    secondary  = { 190, 200, 220, 200 },   -- 次要描述
+    muted      = { 130, 140, 160, 150 },   -- 提示 / 禁用
+    bright     = { 240, 245, 255, 240 },   -- 高亮白
+
+    -- 面板样式
+    panelBg    = { 10, 14, 30, 220 },
+    panelBorder = { 55, 90, 150, 160 },
+    panelShadow = {{ x = 0, y = 2, blur = 12, spread = 0, color = { 0, 0, 0, 80 } }},
+    divider    = { 50, 80, 140, 100 },
+}
+
+-- ============================================================================
+-- 动画追踪
+-- ============================================================================
+
+local prevGold_ = 0
+local prevMaterial_ = 0
+local prevEnergy_ = 0
+local prevHP_ = 0
+
+-- ============================================================================
 -- UI 控件引用
 -- ============================================================================
 
@@ -48,43 +79,41 @@ local upgradePanelVisible_ = false
 -- 统一 Root 管理（单一 gameRoot_，子面板 Show/Hide）
 -- ============================================================================
 
-local gameRoot_ = nil       -- 持久根面板
-local hudLayer_ = nil       -- HUD 层（常驻）
-local inventoryPanel_ = nil -- 右侧背包面板
-local towerDetailPanel_ = nil -- 左侧塔详情面板
-local dropOverlay_ = nil    -- 波次掉落 3 选 1
+local gameRoot_ = nil
+local hudLayer_ = nil
+local inventoryPanel_ = nil
+local towerDetailPanel_ = nil
+local dropOverlay_ = nil
 
 -- 状态
 local dropOverlayVisible_ = false
 local artifactPanelVisible_ = false
 local towerDetailVisible_ = false
-local currentDetailTower_ = nil  -- 当前查看的塔索引
+local currentDetailTower_ = nil
 
 -- ---- 背包面板动画 ----
 local INV_PANEL_HEIGHT = 120
 local INV_BOTTOM_SHOWN = 8
-local INV_BOTTOM_HIDDEN = -(INV_PANEL_HEIGHT + 20)  -- 完全隐藏在屏幕下方
-local INV_ANIM_DURATION = 0.35  -- 动画时长(秒)
+local INV_BOTTOM_HIDDEN = -(INV_PANEL_HEIGHT + 20)
+local INV_ANIM_DURATION = 0.35
 
 local invCurrentBottom_ = INV_BOTTOM_HIDDEN
 local invAnimStartTime_ = 0
 local invAnimFrom_ = INV_BOTTOM_HIDDEN
 local invAnimTo_ = INV_BOTTOM_HIDDEN
 local invAnimating_ = false
-local invAnimDirection_ = "hide"  -- "show" | "hide"
+local invAnimDirection_ = "hide"
 
 -- ============================================================================
 -- 缓动函数
 -- ============================================================================
 
---- ease-out-back: 滑入时带轻微回弹
 local function easeOutBack(t)
     local c1 = 1.70158
     local c3 = c1 + 1
     return 1 + c3 * (t - 1) * (t - 1) * (t - 1) + c1 * (t - 1) * (t - 1)
 end
 
---- ease-in-cubic: 滑出时加速离开
 local function easeInCubic(t)
     return t * t * t
 end
@@ -92,19 +121,16 @@ end
 -- 拖拽上下文
 local dragCtx_ = nil
 
--- 背包 ItemSlot 列表（刷新用）
+-- 背包 ItemSlot 列表
 local invSlots_ = {}
--- 塔详情中的主/副槽 ItemSlot
 local detailMainSlot_ = nil
 local detailSubSlot_ = nil
--- 塔详情中的属性标签
 local detailTitleLabel_ = nil
 local detailStatsLabel_ = nil
 
 -- 建塔确认气泡
 local placementBubble_ = nil
 local placementBubbleCostLabel_ = nil
-
 
 -- ============================================================================
 -- 圣器视觉映射
@@ -140,6 +166,24 @@ local function rarityBorderColor(rarity)
 end
 
 -- ============================================================================
+-- 脉冲动画辅助
+-- ============================================================================
+
+local function pulseWidget(widget)
+    if not widget then return end
+    widget:Animate({
+        keyframes = {
+            [0]   = { scale = 1.0 },
+            [0.4] = { scale = 1.25 },
+            [1]   = { scale = 1.0 },
+        },
+        duration = 0.3,
+        easing = "easeOut",
+        fillMode = "backwards",
+    })
+end
+
+-- ============================================================================
 -- 初始化
 -- ============================================================================
 
@@ -155,10 +199,9 @@ function M.InitUI()
 end
 
 -- ============================================================================
--- 3D Raycast 辅助：鼠标位置 → 网格坐标 → 找塔
+-- 3D Raycast 辅助
 -- ============================================================================
 
---- 从当前鼠标位置 raycast 到 Y=0 平面，返回 gx, gz
 local function raycastToGrid()
     local pos = input.mousePosition
     local sx = pos.x / graphics:GetWidth()
@@ -171,7 +214,6 @@ local function raycastToGrid()
     return math.floor(hit.x + 0.5), math.floor(hit.z + 0.5)
 end
 
---- 在给定网格坐标找到塔索引
 local function findTowerAt(gx, gz)
     for idx, tower in ipairs(GS.towers) do
         if tower.gx == gx and tower.gz == gz then
@@ -185,7 +227,6 @@ end
 -- 拖拽回调
 -- ============================================================================
 
---- 处理拖拽到 UI 槽位（塔详情面板的主/副槽）
 local function handleUISlotDrop(itemData, sourceSlot, targetSlot)
     if not currentDetailTower_ then return end
     local invIndex = itemData.invIndex
@@ -205,7 +246,6 @@ local function handleUISlotDrop(itemData, sourceSlot, targetSlot)
     M.RefreshTowerDetail()
 end
 
---- 处理拖拽到 3D 场景（找塔并装配）
 local function handleSceneDrop(itemData, sourceSlot)
     local invIndex = itemData.invIndex
     if not invIndex then return end
@@ -216,67 +256,69 @@ local function handleSceneDrop(itemData, sourceSlot)
     local towerIndex = findTowerAt(gx, gz)
     if not towerIndex then return end
 
-    -- 自动选槽：主槽空→主槽；主满副空→副槽；都满→替换主槽
     local tower = GS.towers[towerIndex]
     local slotType = "main"
     if tower.mainSlot then
         if not tower.subSlot then
             slotType = "sub"
         else
-            slotType = "main"  -- 替换主槽
+            slotType = "main"
         end
     end
 
     Artifact.EquipToTower(invIndex, towerIndex, slotType)
     M.RefreshInventoryPanel()
-    -- 如果详情面板打开且是同一座塔，刷新
     if towerDetailVisible_ and currentDetailTower_ == towerIndex then
         M.RefreshTowerDetail()
     end
 end
 
 -- ============================================================================
--- 创建游戏 UI（统一 Root）
+-- 创建游戏 UI
 -- ============================================================================
 
 function M.CreateGameUI()
     -- ---- HUD 标签 ----
     goldLabel_ = UI.Label {
         text = "", fontSize = 15,
-        fontColor = { 255, 215, 0, 255 },
+        fontColor = CLR.gold,
+        transition = "scale 0.2s easeOut",
     }
     materialLabel_ = UI.Label {
         text = "", fontSize = 15,
-        fontColor = { 100, 220, 120, 255 },
+        fontColor = CLR.success,
+        transition = "scale 0.2s easeOut",
     }
     energyLabel_ = UI.Label {
         text = "", fontSize = 15,
-        fontColor = { 100, 180, 255, 255 },
+        fontColor = CLR.energy,
+        transition = "scale 0.2s easeOut",
     }
     costLabel_ = UI.Label {
         text = "", fontSize = 12,
-        fontColor = { 200, 200, 200, 200 },
+        fontColor = CLR.secondary,
     }
     statsLabel_ = UI.Label {
         text = "", fontSize = 13,
-        fontColor = { 180, 220, 255, 230 },
+        fontColor = CLR.bright,
     }
     waveLabel_ = UI.Label {
-        text = "", fontSize = 14,
-        fontColor = { 255, 220, 140, 240 },
+        text = "", fontSize = 15,
+        fontColor = CLR.warning,
+        transition = "scale 0.25s easeOut",
     }
     previewLabel_ = UI.Label {
         text = "", fontSize = 11,
-        fontColor = { 200, 200, 180, 180 },
+        fontColor = CLR.muted,
     }
     powerLabel_ = UI.Label {
         text = "", fontSize = 12,
-        fontColor = { 140, 200, 255, 220 },
+        fontColor = CLR.energy,
     }
     hintLabel_ = UI.Label {
-        text = "Left Click: Build | Middle Drag: Pan | Scroll: Zoom",
+        text = "左键: 建塔 | 中键拖动: 移动视角 | 滚轮: 缩放",
         fontSize = 12,
-        fontColor = { 255, 255, 230, 160 },
+        fontColor = { 255, 255, 230, 140 },
         position = "absolute",
         bottom = 10, left = 0, right = 0,
         textAlign = "center",
@@ -286,27 +328,31 @@ function M.CreateGameUI()
     speedBtn1_ = UI.Button {
         text = "x1", width = 40, height = 26, fontSize = 12,
         variant = "primary",
+        transition = "backgroundColor 0.15s easeOut, borderColor 0.15s easeOut",
         onClick = function() GS.gameSpeed = 1 end,
     }
     speedBtn2_ = UI.Button {
         text = "x2", width = 40, height = 26, fontSize = 12,
+        transition = "backgroundColor 0.15s easeOut, borderColor 0.15s easeOut",
         onClick = function() GS.gameSpeed = 2 end,
     }
     speedBtn3_ = UI.Button {
         text = "x3", width = 40, height = 26, fontSize = 12,
+        transition = "backgroundColor 0.15s easeOut, borderColor 0.15s easeOut",
         onClick = function() GS.gameSpeed = 3 end,
     }
     speedPanel_ = UI.Panel {
         flexDirection = "row", gap = 4, alignItems = "center",
         children = {
-            UI.Label { text = "Speed:", fontSize = 11, fontColor = { 160, 170, 190, 200 } },
+            UI.Label { text = "速度:", fontSize = 11, fontColor = CLR.muted },
             speedBtn1_, speedBtn2_, speedBtn3_,
         },
     }
 
     -- 布线按钮
     wiringBtn_ = UI.Button {
-        text = "Wire [E]", width = 72, height = 28, fontSize = 12,
+        text = "布线 [E]", width = 76, height = 28, fontSize = 12,
+        transition = "backgroundColor 0.15s easeOut",
         onClick = function()
             local EnergyTower = require("EnergyTower")
             EnergyTower.ToggleWiringMode()
@@ -316,19 +362,20 @@ function M.CreateGameUI()
     -- 升级面板
     upgradeLevelLabel_ = UI.Label {
         text = "", fontSize = 16,
-        fontColor = { 255, 220, 80, 255 },
+        fontColor = CLR.gold,
     }
     upgradeInfoLabel_ = UI.Label {
         text = "", fontSize = 12,
-        fontColor = { 200, 220, 240, 220 },
+        fontColor = CLR.secondary,
     }
     upgradeCostLabel_ = UI.Label {
         text = "", fontSize = 12,
-        fontColor = { 200, 200, 200, 200 },
+        fontColor = CLR.secondary,
     }
     upgradeBtn_ = UI.Button {
-        text = "Upgrade", variant = "primary",
+        text = "升级", variant = "primary",
         width = 120, height = 32, fontSize = 14,
+        transition = "opacity 0.2s easeOut",
         onClick = function(self)
             local EnergyTower = require("EnergyTower")
             if EnergyTower.Upgrade() then
@@ -342,9 +389,10 @@ function M.CreateGameUI()
         position = "absolute",
         bottom = 50, left = 8,
         flexDirection = "column", gap = 6,
-        backgroundColor = { 15, 20, 35, 210 },
-        borderRadius = 8, paddingX = 14, paddingY = 10,
-        borderWidth = 1, borderColor = { 80, 140, 200, 180 },
+        backgroundColor = CLR.panelBg,
+        borderRadius = 10, paddingX = 16, paddingY = 12,
+        borderWidth = 1, borderColor = CLR.panelBorder,
+        boxShadow = CLR.panelShadow,
         display = "none",
         children = { upgradeLevelLabel_, upgradeInfoLabel_, upgradeCostLabel_, upgradeBtn_ },
     }
@@ -362,23 +410,32 @@ function M.CreateGameUI()
                 alignItems = "flex-start",
                 pointerEvents = "box-none",
                 children = {
+                    -- 左上: 资源面板
                     UI.Panel {
-                        flexDirection = "column", gap = 3,
-                        backgroundColor = { 0, 0, 0, 140 },
-                        borderRadius = 6, paddingX = 12, paddingY = 8,
+                        flexDirection = "column", gap = 4,
+                        backgroundColor = CLR.panelBg,
+                        borderRadius = 10, paddingX = 14, paddingY = 10,
+                        borderWidth = 1, borderColor = CLR.panelBorder,
+                        boxShadow = CLR.panelShadow,
                         children = { goldLabel_, materialLabel_, energyLabel_, costLabel_, wiringBtn_ },
                     },
+                    -- 中上: 波次面板
                     UI.Panel {
-                        flexDirection = "column", gap = 3,
-                        backgroundColor = { 0, 0, 0, 140 },
-                        borderRadius = 6, paddingX = 12, paddingY = 8,
+                        flexDirection = "column", gap = 4,
+                        backgroundColor = CLR.panelBg,
+                        borderRadius = 10, paddingX = 14, paddingY = 10,
+                        borderWidth = 1, borderColor = CLR.panelBorder,
+                        boxShadow = CLR.panelShadow,
                         alignItems = "center",
                         children = { waveLabel_, previewLabel_, speedPanel_ },
                     },
+                    -- 右上: 状态面板
                     UI.Panel {
-                        flexDirection = "column", gap = 3,
-                        backgroundColor = { 0, 0, 0, 140 },
-                        borderRadius = 6, paddingX = 12, paddingY = 8,
+                        flexDirection = "column", gap = 4,
+                        backgroundColor = CLR.panelBg,
+                        borderRadius = 10, paddingX = 14, paddingY = 10,
+                        borderWidth = 1, borderColor = CLR.panelBorder,
+                        boxShadow = CLR.panelShadow,
                         children = { statsLabel_, powerLabel_ },
                     },
                 },
@@ -402,13 +459,13 @@ function M.CreateGameUI()
         end,
     }
 
-    -- ---- 背包面板（右侧，初始隐藏）----
+    -- ---- 背包面板 ----
     inventoryPanel_ = M.BuildInventoryPanel()
 
-    -- ---- 塔详情面板（悬浮，初始隐藏）----
+    -- ---- 塔详情面板 ----
     towerDetailPanel_ = M.BuildTowerDetailPanel()
 
-    -- ---- 建塔确认气泡（悬浮，初始隐藏）----
+    -- ---- 建塔确认气泡 ----
     placementBubble_ = M.BuildPlacementBubble()
 
     -- ---- 统一 Root ----
@@ -420,11 +477,17 @@ function M.CreateGameUI()
             inventoryPanel_,
             towerDetailPanel_,
             placementBubble_,
-            dragCtx_,  -- 最上层，渲染拖拽图标
+            dragCtx_,
         },
     }
 
     UI.SetRoot(gameRoot_)
+
+    -- 初始化动画追踪
+    prevGold_ = GS.gold
+    prevMaterial_ = GS.material
+    prevEnergy_ = GS.energy
+    prevHP_ = GS.etHP
 
     -- 强制确保面板初始隐藏
     artifactPanelVisible_ = false
@@ -447,7 +510,6 @@ end
 -- ============================================================================
 
 function M.BuildInventoryPanel()
-    -- 创建槽位列表（水平排列）
     invSlots_ = {}
     local slotChildren = {}
 
@@ -458,8 +520,8 @@ function M.BuildInventoryPanel()
             paddingX = 20,
             children = {
                 UI.Label {
-                    text = "No artifacts yet",
-                    fontSize = 12, fontColor = { 100, 110, 130, 160 },
+                    text = "暂无圣器",
+                    fontSize = 12, fontColor = CLR.muted,
                 },
             },
         })
@@ -488,13 +550,11 @@ function M.BuildInventoryPanel()
                 size = 52,
             }
 
-            -- 已装配的圣器：在槽位下方显示状态
             local statusText = ""
             if entry.equipped then
                 local tower = GS.towers[entry.towerIndex]
-                local slotName = entry.slotType == "main" and "M" or "S"
-                local posStr = tower and string.format("(%d,%d)", tower.gx, tower.gz) or "?"
-                statusText = slotName .. " " .. posStr
+                local slotName = entry.slotType == "main" and "主" or "副"
+                statusText = slotName .. "槽"
             end
 
             local slotWrapper = UI.Panel {
@@ -509,7 +569,7 @@ function M.BuildInventoryPanel()
                     },
                     entry.equipped and UI.Label {
                         text = statusText,
-                        fontSize = 7, fontColor = { 120, 255, 180, 200 },
+                        fontSize = 7, fontColor = CLR.success,
                         textAlign = "center",
                     } or nil,
                 },
@@ -520,34 +580,34 @@ function M.BuildInventoryPanel()
         end
     end
 
-    -- 底部水平面板：初始 bottom = INV_BOTTOM_HIDDEN（屏幕外）
     local panel = UI.Panel {
         position = "absolute",
         bottom = INV_BOTTOM_HIDDEN,
         left = 60, right = 60,
         height = INV_PANEL_HEIGHT,
         flexDirection = "row", gap = 0,
-        backgroundColor = { 8, 12, 25, 230 },
+        backgroundColor = CLR.panelBg,
         borderRadius = 12,
-        borderWidth = 1, borderColor = { 60, 100, 160, 180 },
+        borderWidth = 1, borderColor = CLR.panelBorder,
+        boxShadow = CLR.panelShadow,
         overflow = "hidden",
         children = {
-            -- 左侧标签区（紧凑）
+            -- 左侧标签区
             UI.Panel {
                 height = "100%", width = 50,
                 flexDirection = "column", justifyContent = "center",
                 alignItems = "center", gap = 4,
-                backgroundColor = { 20, 30, 55, 255 },
-                borderRightWidth = 1, borderRightColor = { 50, 80, 140, 180 },
+                backgroundColor = { 18, 24, 48, 255 },
+                borderRightWidth = 1, borderRightColor = CLR.divider,
                 flexShrink = 0,
                 children = {
                     UI.Label {
-                        text = "BAG",
-                        fontSize = 11, fontColor = { 255, 220, 80, 255 },
+                        text = "背包",
+                        fontSize = 11, fontColor = CLR.gold,
                     },
                     UI.Label {
                         text = "[B]",
-                        fontSize = 9, fontColor = { 140, 150, 170, 160 },
+                        fontSize = 9, fontColor = CLR.muted,
                     },
                 },
             },
@@ -566,18 +626,18 @@ function M.BuildInventoryPanel()
                     },
                 },
             },
-            -- 右侧提示区（紧凑）
+            -- 右侧提示区
             UI.Panel {
                 height = "100%", width = 50,
                 flexDirection = "column", justifyContent = "center",
                 alignItems = "center",
-                backgroundColor = { 15, 20, 40, 220 },
-                borderLeftWidth = 1, borderLeftColor = { 50, 80, 140, 140 },
+                backgroundColor = { 14, 18, 38, 220 },
+                borderLeftWidth = 1, borderLeftColor = CLR.divider,
                 flexShrink = 0,
                 children = {
                     UI.Label {
-                        text = "Drag\nto\nTower",
-                        fontSize = 8, fontColor = { 130, 140, 160, 160 },
+                        text = "拖拽\n到\n塔上",
+                        fontSize = 8, fontColor = CLR.muted,
                         textAlign = "center",
                     },
                 },
@@ -589,21 +649,16 @@ function M.BuildInventoryPanel()
 end
 
 -- ============================================================================
--- 背包面板刷新（重建内容）
+-- 背包面板刷新
 -- ============================================================================
 
 function M.RefreshInventoryPanel()
     if not gameRoot_ or not inventoryPanel_ then return end
 
-    -- 移除旧面板
     gameRoot_:RemoveChild(inventoryPanel_)
-
-    -- 重建
     inventoryPanel_ = M.BuildInventoryPanel()
-    -- 保持当前动画位置（面板用 bottom 定位，不再依赖 display:none）
     inventoryPanel_:SetStyle({ bottom = math.floor(invCurrentBottom_) })
 
-    -- 重排子节点：hudLayer_, inventoryPanel_, towerDetailPanel_, dragCtx_
     gameRoot_:RemoveChild(dragCtx_)
     gameRoot_:RemoveChild(towerDetailPanel_)
     gameRoot_:AddChild(inventoryPanel_)
@@ -617,19 +672,18 @@ end
 
 function M.BuildTowerDetailPanel()
     detailTitleLabel_ = UI.Label {
-        text = "Tower Detail",
-        fontSize = 14, fontColor = { 255, 220, 80, 255 },
+        text = "塔详情",
+        fontSize = 14, fontColor = CLR.gold,
         textAlign = "center",
     }
     detailStatsLabel_ = UI.Label {
         text = "",
-        fontSize = 10, fontColor = { 200, 210, 220, 220 },
+        fontSize = 10, fontColor = CLR.secondary,
         whiteSpace = "normal", wordBreak = "break-word",
         textAlign = "center",
         maxWidth = 220,
     }
 
-    -- 主槽 ItemSlot
     detailMainSlot_ = ItemSlot {
         slotId = "detail_main",
         slotCategory = "equipment",
@@ -637,11 +691,10 @@ function M.BuildTowerDetailPanel()
         item = nil,
         dragContext = dragCtx_,
         size = 46,
-        slotTypeIcon = "M",
+        slotTypeIcon = "主",
         showTypeIcon = true,
     }
 
-    -- 副槽 ItemSlot
     detailSubSlot_ = ItemSlot {
         slotId = "detail_sub",
         slotCategory = "equipment",
@@ -649,7 +702,7 @@ function M.BuildTowerDetailPanel()
         item = nil,
         dragContext = dragCtx_,
         size = 46,
-        slotTypeIcon = "S",
+        slotTypeIcon = "副",
         showTypeIcon = true,
     }
 
@@ -657,16 +710,16 @@ function M.BuildTowerDetailPanel()
         position = "absolute", top = -999, left = -999,
         width = 240,
         flexDirection = "column", gap = 4,
-        backgroundColor = { 8, 12, 25, 230 },
-        borderRadius = 8, paddingX = 10, paddingY = 8,
-        borderWidth = 1, borderColor = { 60, 100, 160, 180 },
-        display = "none",  -- 初始隐藏
-        pointerEvents = "box-none",  -- 面板本身不拦截点击，子控件仍可交互
+        backgroundColor = CLR.panelBg,
+        borderRadius = 10, paddingX = 12, paddingY = 10,
+        borderWidth = 1, borderColor = CLR.panelBorder,
+        boxShadow = CLR.panelShadow,
+        display = "none",
+        pointerEvents = "box-none",
         alignItems = "center",
         children = {
             detailTitleLabel_,
-            -- 分割线
-            UI.Panel { width = "90%", height = 1, backgroundColor = { 50, 80, 140, 120 } },
+            UI.Panel { width = "90%", height = 1, backgroundColor = CLR.divider },
             detailStatsLabel_,
             -- 槽位区
             UI.Panel {
@@ -677,10 +730,10 @@ function M.BuildTowerDetailPanel()
                     UI.Panel {
                         flexDirection = "column", gap = 2, alignItems = "center",
                         children = {
-                            UI.Label { text = "Main 100%", fontSize = 9, fontColor = { 140, 200, 140, 200 } },
+                            UI.Label { text = "主槽 100%", fontSize = 9, fontColor = CLR.success },
                             detailMainSlot_,
                             UI.Button {
-                                text = "Unequip", width = 52, height = 20, fontSize = 8,
+                                text = "卸下", width = 52, height = 20, fontSize = 8,
                                 onClick = function()
                                     if not currentDetailTower_ then return end
                                     local tower = GS.towers[currentDetailTower_]
@@ -697,10 +750,10 @@ function M.BuildTowerDetailPanel()
                     UI.Panel {
                         flexDirection = "column", gap = 2, alignItems = "center",
                         children = {
-                            UI.Label { text = "Sub 60%", fontSize = 9, fontColor = { 180, 160, 100, 200 } },
+                            UI.Label { text = "副槽 60%", fontSize = 9, fontColor = CLR.warning },
                             detailSubSlot_,
                             UI.Button {
-                                text = "Unequip", width = 52, height = 20, fontSize = 8,
+                                text = "卸下", width = 52, height = 20, fontSize = 8,
                                 onClick = function()
                                     if not currentDetailTower_ then return end
                                     local tower = GS.towers[currentDetailTower_]
@@ -722,13 +775,13 @@ function M.BuildTowerDetailPanel()
 end
 
 -- ============================================================================
--- 建塔确认气泡（悬浮 UI，投影到世界坐标上方）
+-- 建塔确认气泡
 -- ============================================================================
 
 function M.BuildPlacementBubble()
     placementBubbleCostLabel_ = UI.Label {
         text = "", fontSize = 11,
-        fontColor = { 255, 220, 80, 240 },
+        fontColor = CLR.gold,
         textAlign = "center",
     }
 
@@ -739,7 +792,6 @@ function M.BuildPlacementBubble()
         flexDirection = "column", gap = 3,
         alignItems = "center",
         children = {
-            -- 圆形 "+" 按钮
             UI.Button {
                 text = "+",
                 width = 50, height = 50,
@@ -749,7 +801,6 @@ function M.BuildPlacementBubble()
                     M.ConfirmPlacement()
                 end,
             },
-            -- 造价标签
             UI.Panel {
                 backgroundColor = { 0, 0, 0, 170 },
                 borderRadius = 6, paddingX = 8, paddingY = 2,
@@ -761,17 +812,15 @@ function M.BuildPlacementBubble()
     return placementBubble_
 end
 
---- 通过 UI 气泡确认建塔
 function M.ConfirmPlacement()
     if not GS.placementPending then return end
     local Tower = require("Tower")
     local gx, gz = GS.placementGX, GS.placementGZ
-    Tower.CancelPlacement()  -- 重置 placementPending
+    Tower.CancelPlacement()
     M.HideTowerDetail()
     Tower.PlaceBasicTower(gx, gz)
 end
 
---- 每帧更新气泡位置（世界坐标投影到屏幕）
 function M.UpdatePlacementBubble()
     if not placementBubble_ then return end
 
@@ -780,7 +829,6 @@ function M.UpdatePlacementBubble()
         return
     end
 
-    -- 投影世界坐标到屏幕
     local worldPos = Vector3(GS.placementGX, 1.0, GS.placementGZ)
     local screenNorm = GS.camera:WorldToScreenPoint(worldPos)
 
@@ -791,23 +839,20 @@ function M.UpdatePlacementBubble()
     local sx = screenNorm.x * screenW
     local sy = screenNorm.y * screenH
 
-    -- 气泡居中于锚点上方
     local bubbleW = 56
     local bubbleH = 76
     local px = sx - bubbleW * 0.5
     local py = sy - bubbleH - 6
 
-    -- 边界约束
     px = math.max(4, math.min(screenW - bubbleW - 4, px))
     py = math.max(4, math.min(screenH - bubbleH - 4, py))
 
     local newTop = math.floor(py)
     local newLeft = math.floor(px)
 
-    -- 更新造价
     local Tower = require("Tower")
     if placementBubbleCostLabel_ then
-        placementBubbleCostLabel_:SetText(Tower.GetTowerCost() .. "g")
+        placementBubbleCostLabel_:SetText(Tower.GetTowerCost() .. " 金")
     end
 
     placementBubble_:SetStyle({ display = "flex", top = newTop, left = newLeft })
@@ -820,7 +865,6 @@ end
 function M.ShowTowerDetail(towerIndex)
     if towerIndex < 1 or towerIndex > #GS.towers then return end
 
-    -- 点击同一座塔 → 关闭面板 (toggle)
     if towerDetailVisible_ and currentDetailTower_ == towerIndex then
         M.HideTowerDetail()
         return
@@ -829,12 +873,20 @@ function M.ShowTowerDetail(towerIndex)
     currentDetailTower_ = towerIndex
     towerDetailVisible_ = true
     if towerDetailPanel_ then
-        towerDetailPanel_:SetStyle({ display = "flex" })
+        towerDetailPanel_:SetStyle({ display = "flex", opacity = 0 })
+        towerDetailPanel_:Animate({
+            keyframes = {
+                [0] = { opacity = 0, translateY = 8 },
+                [1] = { opacity = 1, translateY = 0 },
+            },
+            duration = 0.2,
+            easing = "easeOut",
+            fillMode = "forwards",
+        })
     end
     M.RefreshTowerDetail()
     M.UpdateTowerDetailPosition()
 
-    -- 联动：打开塔详情时同时打开背包面板
     M.ShowArtifactPanel()
 end
 
@@ -845,11 +897,9 @@ function M.HideTowerDetail()
         towerDetailPanel_:SetStyle({ display = "none", top = -9999, left = -9999 })
     end
 
-    -- 联动：关闭塔详情时同时关闭背包面板
     M.HideArtifactPanel()
 end
 
---- 每帧更新塔详情面板的屏幕位置（跟随塔的 3D 坐标）
 function M.UpdateTowerDetailPosition()
     if not towerDetailVisible_ or not currentDetailTower_ then return end
     if currentDetailTower_ > #GS.towers then
@@ -863,7 +913,6 @@ function M.UpdateTowerDetailPosition()
         return
     end
 
-    -- 塔上方约 1.5 米处作为锚点
     local worldPos = Vector3(tower.gx, 1.5, tower.gz)
     local screenNorm = GS.camera:WorldToScreenPoint(worldPos)
 
@@ -874,13 +923,11 @@ function M.UpdateTowerDetailPosition()
     local sx = screenNorm.x * screenW
     local sy = screenNorm.y * screenH
 
-    -- 面板宽度 240，居中放置在锚点上方
     local panelW = 240
-    local panelH = 200  -- 近似高度
+    local panelH = 200
     local px = sx - panelW * 0.5
-    local py = sy - panelH - 10  -- 在锚点上方留出间距
+    local py = sy - panelH - 10
 
-    -- 边界约束
     px = math.max(4, math.min(screenW - panelW - 4, px))
     py = math.max(4, math.min(screenH - panelH - 4, py))
 
@@ -888,7 +935,6 @@ function M.UpdateTowerDetailPosition()
     local newLeft = math.floor(px)
 
     if towerDetailPanel_ then
-        -- 只在位置实际变化时更新，避免不必要的布局重算
         local curTop = towerDetailPanel_.props.top
         local curLeft = towerDetailPanel_.props.left
         if curTop ~= newTop or curLeft ~= newLeft then
@@ -913,12 +959,10 @@ function M.RefreshTowerDetail()
     local spdMult = math.max(0.30, tower.ratio * #GS.towers) * (tower.artAtkSpdMult or 1.0)
     local fireInt = CONFIG.TowerFireInterval / math.max(0.10, spdMult)
 
-    -- 标题
     if detailTitleLabel_ then
-        detailTitleLabel_:SetText(string.format("Tower (%d, %d)", tower.gx, tower.gz))
+        detailTitleLabel_:SetText(string.format("防御塔 (%d, %d)", tower.gx, tower.gz))
     end
 
-    -- 属性
     if detailStatsLabel_ then
         local dmgBonus = dmg - baseDmg
         local dmgBonusStr = ""
@@ -926,8 +970,8 @@ function M.RefreshTowerDetail()
             dmgBonusStr = string.format(" (%+.1f)", dmgBonus)
         end
         detailStatsLabel_:SetText(string.format(
-            "Damage: %.1f%s\nAttack Speed: %.2fs\nPower: %.0f%%\nRange: %.1f",
-            dmg, dmgBonusStr, fireInt, tower.ratio * 100, CONFIG.TowerRange
+            "伤害: %.1f%s\n攻速: %.2f秒\n功率: %.0f%%",
+            dmg, dmgBonusStr, fireInt, tower.ratio * 100
         ))
     end
 
@@ -980,7 +1024,6 @@ function M.ShowArtifactPanel()
     if artifactPanelVisible_ then return end
     artifactPanelVisible_ = true
     M.RefreshInventoryPanel()
-    -- 启动滑入动画
     invAnimFrom_ = invCurrentBottom_
     invAnimTo_ = INV_BOTTOM_SHOWN
     invAnimStartTime_ = time.elapsedTime
@@ -994,7 +1037,6 @@ end
 function M.HideArtifactPanel()
     if not artifactPanelVisible_ then return end
     artifactPanelVisible_ = false
-    -- 启动滑出动画
     invAnimFrom_ = invCurrentBottom_
     invAnimTo_ = INV_BOTTOM_HIDDEN
     invAnimStartTime_ = time.elapsedTime
@@ -1019,34 +1061,48 @@ function M.RefreshUpgradePanel()
     local stats = EnergyTower.GetLevelStats()
 
     if upgradeLevelLabel_ then
-        upgradeLevelLabel_:SetText(string.format("Energy Tower  Lv.%d", GS.etLevel))
+        upgradeLevelLabel_:SetText(string.format("能源塔  Lv.%d", GS.etLevel))
     end
     if upgradeInfoLabel_ then
         upgradeInfoLabel_:SetText(string.format(
-            "Power: %d  HP: %d/%d  Range: %d  Eff: %.2f",
-            stats.power, GS.etHP, GS.etMaxHP, stats.radius, stats.convEff
+            "功率: %d  |  生命: %d/%d  |  范围: %d",
+            stats.power, GS.etHP, GS.etMaxHP, stats.radius
         ))
     end
 
     local cost = EnergyTower.GetUpgradeCost()
     if cost then
         if upgradeCostLabel_ then
-            upgradeCostLabel_:SetText(string.format("Cost: %d Gold + %d Material", cost.gold, cost.material))
+            upgradeCostLabel_:SetText(string.format("消耗: %d 金 + %d 材料", cost.gold, cost.material))
         end
         if upgradeBtn_ then
             local canUp = EnergyTower.CanUpgrade()
-            upgradeBtn_:SetText(canUp and "Upgrade" or "Insufficient")
+            upgradeBtn_:SetText(canUp and "升级" or "资源不足")
             upgradeBtn_:SetDisabled(not canUp)
+            if not canUp then
+                upgradeCostLabel_:SetStyle({ fontColor = CLR.danger })
+            else
+                upgradeCostLabel_:SetStyle({ fontColor = CLR.secondary })
+            end
         end
     else
-        if upgradeCostLabel_ then upgradeCostLabel_:SetText("MAX LEVEL") end
-        if upgradeBtn_ then upgradeBtn_:SetText("Max Lv."); upgradeBtn_:SetDisabled(true) end
+        if upgradeCostLabel_ then upgradeCostLabel_:SetText("已满级") end
+        if upgradeBtn_ then upgradeBtn_:SetText("满级"); upgradeBtn_:SetDisabled(true) end
     end
 end
 
 function M.ShowUpgradePanel()
     if not upgradePanel_ then return end
-    upgradePanel_:SetStyle({ display = "flex" })
+    upgradePanel_:SetStyle({ display = "flex", opacity = 0 })
+    upgradePanel_:Animate({
+        keyframes = {
+            [0] = { opacity = 0, translateY = 10 },
+            [1] = { opacity = 1, translateY = 0 },
+        },
+        duration = 0.25,
+        easing = "easeOut",
+        fillMode = "forwards",
+    })
     upgradePanelVisible_ = true
     M.RefreshUpgradePanel()
 end
@@ -1076,57 +1132,90 @@ function M.RefreshUI()
     local cost = Tower.GetTowerCost()
     local canBuild = GS.gold >= cost
 
-    if goldLabel_ then goldLabel_:SetText("Gold: " .. GS.gold) end
-    if materialLabel_ then materialLabel_:SetText("Material: " .. GS.material) end
-    if energyLabel_ then energyLabel_:SetText("Energy: " .. GS.energy) end
+    -- 金币
+    if goldLabel_ then
+        goldLabel_:SetText("金币: " .. GS.gold)
+        if GS.gold ~= prevGold_ then
+            pulseWidget(goldLabel_)
+            prevGold_ = GS.gold
+        end
+    end
+    -- 材料
+    if materialLabel_ then
+        materialLabel_:SetText("材料: " .. GS.material)
+        if GS.material ~= prevMaterial_ then
+            pulseWidget(materialLabel_)
+            prevMaterial_ = GS.material
+        end
+    end
+    -- 能量
+    if energyLabel_ then
+        energyLabel_:SetText("能量: " .. GS.energy)
+        if GS.energy ~= prevEnergy_ then
+            pulseWidget(energyLabel_)
+            prevEnergy_ = GS.energy
+        end
+    end
+    -- 造价
     if costLabel_ then
-        local costStr = "Next tower: " .. cost
-        if not canBuild then costStr = costStr .. "  (insufficient)" end
+        local costStr = "造价: " .. cost
+        if not canBuild then
+            costStr = costStr .. "  (不足)"
+            costLabel_:SetStyle({ fontColor = CLR.danger })
+        else
+            costLabel_:SetStyle({ fontColor = CLR.secondary })
+        end
         costLabel_:SetText(costStr)
     end
 
     local EnergyTower = require("EnergyTower")
+    -- 状态标签: 简洁的关键信息
     if statsLabel_ then
         local n = #GS.towers
         local nm = #GS.monsters
-        if n == 0 then
-            statsLabel_:SetText(string.format(
-                "Lv.%d | HP: %d/%d | Towers: 0 | Mobs: %d",
-                GS.etLevel, GS.etHP, GS.etMaxHP, nm
-            ))
-        else
-            statsLabel_:SetText(string.format(
-                "Lv.%d | HP: %d/%d | T: %d | M: %d",
-                GS.etLevel, GS.etHP, GS.etMaxHP, n, nm
-            ))
+        -- HP 变化动画
+        if GS.etHP ~= prevHP_ then
+            pulseWidget(statsLabel_)
+            prevHP_ = GS.etHP
         end
+        -- HP 颜色
+        local hpRatio = GS.etMaxHP > 0 and (GS.etHP / GS.etMaxHP) or 1
+        local hpColor = CLR.bright
+        if hpRatio < 0.3 then
+            hpColor = CLR.danger
+        elseif hpRatio < 0.6 then
+            hpColor = CLR.warning
+        end
+        statsLabel_:SetStyle({ fontColor = hpColor })
+        statsLabel_:SetText(string.format(
+            "Lv.%d | 生命: %d/%d | 塔: %d | 怪: %d",
+            GS.etLevel, GS.etHP, GS.etMaxHP, n, nm
+        ))
     end
 
+    -- 功率标签: 精简版
     if powerLabel_ then
-        local n = #GS.towers
         local totalP = EnergyTower.GetTotalPower()
+        local n = #GS.towers
         if n == 0 then
-            powerLabel_:SetText(string.format("P_total: %d | Idle", totalP))
+            powerLabel_:SetText(string.format("总功率: %d | 空闲", totalP))
+            powerLabel_:SetStyle({ fontColor = CLR.energy })
         else
-            -- 统计边数和总 DPS (图模型)
-            local convEff = EnergyTower.GetConvEff()
-            local numEdges = GS.energyGraph.edgeCount
-            local totalDps = 0
-            for ek, pwr in pairs(GS.energyNetwork.edgePower) do
-                totalDps = totalDps + pwr * CONFIG.CircuitDmgCoeff * convEff
+            local scStr = ""
+            if GS.shortCircuit and GS.shortCircuit.active then
+                scStr = " | 短路!"
+                powerLabel_:SetStyle({ fontColor = CLR.danger })
+            else
+                powerLabel_:SetStyle({ fontColor = CLR.energy })
             end
-            local scStr = GS.shortCircuit.active and " | SHORT!" or ""
-            powerLabel_:SetText(string.format(
-                "P: %d | E: %d | DPS: %.1f%s",
-                totalP, numEdges, totalDps, scStr
-            ))
+            powerLabel_:SetText(string.format("总功率: %d | 塔: %d%s", totalP, n, scStr))
         end
     end
 
-    -- 布线按钮高亮
+    -- 布线按钮
     if wiringBtn_ then
         wiringBtn_:SetVariant(GS.wiringMode and "primary" or "default")
-        wiringBtn_:SetText(GS.wiringMode and "Wire ON [E]" or "Wire [E]")
+        wiringBtn_:SetText(GS.wiringMode and "布线中 [E]" or "布线 [E]")
     end
 
     -- 速度按钮高亮
@@ -1140,11 +1229,14 @@ function M.RefreshUI()
         applyBtn(speedBtn3_, 3)
     end
 
-    if waveLabel_ then waveLabel_:SetText(Wave.GetWaveInfo()) end
+    -- 波次
+    if waveLabel_ then
+        waveLabel_:SetText(Wave.GetWaveInfo())
+    end
     if previewLabel_ then
         local preview = Wave.GetNextWavePreview()
         if preview then
-            previewLabel_:SetText(string.format("Next: %s (%d)", preview.summary, preview.totalMonsters))
+            previewLabel_:SetText(string.format("下一波: %s (%d只)", preview.summary, preview.totalMonsters))
         else
             previewLabel_:SetText("")
         end
@@ -1155,7 +1247,7 @@ function M.RefreshUI()
     M.UpdateHintLabel()
     M.CheckDropOverlay()
 
-    -- 塔详情面板：跟踪位置 + 自动关闭（塔被拆除时）
+    -- 塔详情面板跟踪
     if towerDetailVisible_ and currentDetailTower_ then
         if currentDetailTower_ > #GS.towers then
             M.HideTowerDetail()
@@ -1164,15 +1256,13 @@ function M.RefreshUI()
         end
     end
 
-    -- ---- 建塔确认气泡位置更新 ----
     M.UpdatePlacementBubble()
 
-    -- ---- 背包面板滑入/滑出动画驱动 ----
+    -- ---- 背包面板滑入/滑出动画 ----
     if invAnimating_ and inventoryPanel_ then
         local elapsed = time.elapsedTime - invAnimStartTime_
         local progress = math.min(elapsed / INV_ANIM_DURATION, 1.0)
 
-        -- 根据方向选择缓动函数
         local easedT
         if invAnimDirection_ == "show" then
             easedT = easeOutBack(progress)
@@ -1181,7 +1271,6 @@ function M.RefreshUI()
         end
 
         invCurrentBottom_ = invAnimFrom_ + (invAnimTo_ - invAnimFrom_) * easedT
-
         inventoryPanel_:SetStyle({ bottom = math.floor(invCurrentBottom_) })
 
         if progress >= 1.0 then
@@ -1193,7 +1282,7 @@ function M.RefreshUI()
 end
 
 -- ============================================================================
--- 悬停提示
+-- 悬停提示 (全中文 + 精简)
 -- ============================================================================
 
 function M.UpdateHintLabel()
@@ -1203,7 +1292,7 @@ function M.UpdateHintLabel()
     local EnergyTower = require("EnergyTower")
 
     if GS.wiringMode then
-        local base = "WIRING: LDrag draw | RClick remove | E exit | " .. CONFIG.LineCostPerSegment .. "g/seg"
+        local base = "布线中: 左键拖画线 | 右键删线 | E 退出 | " .. CONFIG.LineCostPerSegment .. "金/段"
         if GS.wiringHintMsg then
             base = base .. "  |  " .. GS.wiringHintMsg
         end
@@ -1213,12 +1302,9 @@ function M.UpdateHintLabel()
 
     if not GS.hoverOnMap then
         if GS.placementPending then
-            hintLabel_:SetText(string.format(
-                "Click [+] at (%d,%d) to confirm | Click elsewhere to cancel | E: Wire | B: Bag | MMB: Pan",
-                GS.placementGX, GS.placementGZ
-            ))
+            hintLabel_:SetText("点击 [+] 确认建塔 | 点击其他位置取消 | E: 布线 | B: 背包")
         else
-            hintLabel_:SetText("LClick: Place marker | Click Tower: Detail | X: Sell | U: Upgrade | E: Wire | B: Bag | Tab: Speed | MMB: Pan")
+            hintLabel_:SetText("左键: 放置标记 | 点击塔: 详情 | X: 出售 | U: 升级 | E: 布线 | B: 背包")
         end
         return
     end
@@ -1236,8 +1322,8 @@ function M.UpdateHintLabel()
 
     if isEnergyTower then
         hintLabel_:SetText(string.format(
-            "Energy Tower Lv.%d | Power: %d | Range: %d | ConvEff: %.2f | Click to Upgrade",
-            GS.etLevel, EnergyTower.GetTotalPower(), EnergyTower.GetEnergyRange(), EnergyTower.GetConvEff()
+            "能源塔 Lv.%d | 功率: %d | 范围: %d | 点击升级",
+            GS.etLevel, EnergyTower.GetTotalPower(), EnergyTower.GetEnergyRange()
         ))
         if input:GetKeyPress(KEY_U) then
             if EnergyTower.Upgrade() then
@@ -1256,36 +1342,29 @@ function M.UpdateHintLabel()
                 local ratio = GS.wavePhase == "preparing" and 0.7 or 0.4
                 local origCost = Tower.GetTowerOriginalCost(idx)
                 local refund = math.floor(origCost * ratio + 0.5)
-                local artInfo = Artifact.GetTowerArtifactInfo(idx)
-                local artStr = ""
-                if artInfo.main then artStr = artStr .. " M:" .. artInfo.main.name end
-                if artInfo.sub then artStr = artStr .. " S:" .. artInfo.sub.name end
                 hintLabel_:SetText(string.format(
-                    "Tower (%d,%d) | Dmg: %.1f | ASpd: %.2fs | Pwr: %.0f%%%s | [X] Sell: %d | LClick: Detail",
-                    gx, gz, dmg, fireInt, tower.ratio * 100, artStr, refund
+                    "防御塔 | 伤害: %.1f | 攻速: %.2fs | [X] 出售: %d金 | 左键: 详情",
+                    dmg, fireInt, refund
                 ))
                 break
             end
         end
     elseif not canAfford then
-        hintLabel_:SetText("Not enough gold! Need: " .. Tower.GetTowerCost())
+        hintLabel_:SetText("金币不足! 需要: " .. Tower.GetTowerCost())
+        hintLabel_:SetStyle({ fontColor = CLR.danger })
+        return
     else
         if GS.placementPending and gx == GS.placementGX and gz == GS.placementGZ then
-            hintLabel_:SetText(string.format(
-                "Click again to BUILD here | Cost: %d",
-                Tower.GetTowerCost()
-            ))
+            hintLabel_:SetText("再次点击确认建造 | 造价: " .. Tower.GetTowerCost())
         else
-            hintLabel_:SetText(string.format(
-                "Click to mark | Cost: %d",
-                Tower.GetTowerCost()
-            ))
+            hintLabel_:SetText("点击放置标记 | 造价: " .. Tower.GetTowerCost())
         end
     end
+    hintLabel_:SetStyle({ fontColor = { 255, 255, 230, 140 } })
 end
 
 -- ============================================================================
--- 圣器掉落 3 选 1
+-- 圣器掉落 3 选 1 (全中文 + 交错动画)
 -- ============================================================================
 
 function M.ShowDropOverlay()
@@ -1306,12 +1385,12 @@ function M.ShowDropOverlay()
         for _, ds in ipairs(def.downsides) do
             if ds.type == "stat_modifier" then
                 local pct = math.abs(ds.modifier) * 100
-                local statName = ds.stat == "damage" and "DMG" or
-                                 ds.stat == "attack_speed" and "ASPD" or ds.stat
+                local statName = ds.stat == "damage" and "伤害" or
+                                 ds.stat == "attack_speed" and "攻速" or ds.stat
                 dsText = dsText .. string.format("-%d%% %s  ", pct, statName)
             end
         end
-        if dsText == "" then dsText = "No downside" end
+        if dsText == "" then dsText = "无副作用" end
 
         local idx = i
         local card = UI.Panel {
@@ -1319,7 +1398,9 @@ function M.ShowDropOverlay()
             backgroundColor = bg,
             borderRadius = 12, paddingX = 16, paddingY = 16,
             borderWidth = 2, borderColor = bc,
+            boxShadow = {{ x = 0, y = 4, blur = 16, spread = 0, color = { bc[1], bc[2], bc[3], 60 } }},
             alignItems = "center",
+            opacity = 0,
             children = {
                 UI.Label {
                     text = Artifact.RARITY_NAMES[def.rarity] or "?",
@@ -1345,7 +1426,7 @@ function M.ShowDropOverlay()
                 },
                 UI.Label {
                     text = def.description, fontSize = 11,
-                    fontColor = { 200, 210, 220, 200 },
+                    fontColor = CLR.secondary,
                     maxWidth = 165, textAlign = "center",
                     whiteSpace = "normal", wordBreak = "break-word",
                 },
@@ -1360,18 +1441,29 @@ function M.ShowDropOverlay()
                     },
                 },
                 UI.Button {
-                    text = "Pick [" .. idx .. "]",
+                    text = "选择 [" .. idx .. "]",
                     variant = "primary",
                     width = 130, height = 34, fontSize = 14,
                     onClick = function() M.OnDropPick(idx) end,
                 },
             },
         }
+        -- 交错入场动画
+        card:Animate({
+            keyframes = {
+                [0] = { opacity = 0, translateY = 30 },
+                [1] = { opacity = 1, translateY = 0 },
+            },
+            duration = 0.35,
+            easing = "easeOutBack",
+            fillMode = "forwards",
+            delay = (i - 1) * 0.1,
+        })
         table.insert(cards, card)
     end
 
     local skipBtn = UI.Button {
-        text = "Skip (+50 Gold) [0]",
+        text = "跳过 (+50金) [0]",
         width = 160, height = 34, fontSize = 13,
         onClick = function() M.OnDropPick(0) end,
     }
@@ -1381,6 +1473,7 @@ function M.ShowDropOverlay()
         position = "absolute", top = 0, left = 0,
         justifyContent = "center", alignItems = "center",
         backgroundColor = { 0, 0, 0, 180 },
+        opacity = 0,
         children = {
             UI.Panel {
                 flexDirection = "column", alignItems = "center", gap = 20,
@@ -1389,12 +1482,12 @@ function M.ShowDropOverlay()
                         flexDirection = "column", alignItems = "center", gap = 4,
                         children = {
                             UI.Label {
-                                text = "Wave Clear!", fontSize = 14,
-                                fontColor = { 180, 200, 220, 200 },
+                                text = "波次通过!",
+                                fontSize = 14, fontColor = CLR.secondary,
                             },
                             UI.Label {
-                                text = "Choose Your Artifact", fontSize = 24,
-                                fontColor = { 255, 220, 80, 255 },
+                                text = "选择你的圣器",
+                                fontSize = 24, fontColor = CLR.gold,
                             },
                         },
                     },
@@ -1408,7 +1501,17 @@ function M.ShowDropOverlay()
         },
     }
 
-    -- 将掉落覆盖层添加到 gameRoot_（在 dragCtx_ 之前）
+    -- 整体淡入
+    dropOverlay_:Animate({
+        keyframes = {
+            [0] = { opacity = 0 },
+            [1] = { opacity = 1 },
+        },
+        duration = 0.25,
+        easing = "easeOut",
+        fillMode = "forwards",
+    })
+
     if gameRoot_ then
         gameRoot_:RemoveChild(dragCtx_)
         gameRoot_:AddChild(dropOverlay_)
@@ -1439,14 +1542,9 @@ function M.CheckDropOverlay()
 end
 
 -- ============================================================================
--- UI 面板命中检测（鼠标是否在背包 / 塔详情面板上）
+-- UI 面板命中检测
 -- ============================================================================
 
---- 检查鼠标是否在某个绝对定位面板的矩形范围内
---- @param panelProps table 面板的 props（包含 top/left/right/bottom/width/height）
---- @param screenW number 逻辑屏幕宽度
---- @param screenH number 逻辑屏幕高度
---- @return boolean
 local function isMouseInPanel(panelProps, screenW, screenH)
     if not panelProps then return false end
 
@@ -1454,18 +1552,15 @@ local function isMouseInPanel(panelProps, screenW, screenH)
     local mx = input.mousePosition.x / dpr
     local my = input.mousePosition.y / dpr
 
-    -- 计算面板在屏幕上的矩形区域
     local pLeft = panelProps.left or 0
     local pTop = panelProps.top or 0
     local pWidth = panelProps.width or 0
     local pHeight = panelProps.height or 0
 
-    -- 如果使用 right 定位（背包面板）
     if panelProps.right and not panelProps.left then
         pLeft = screenW - (panelProps.right or 0) - pWidth
     end
 
-    -- 如果使用 bottom 定位确定高度范围
     if panelProps.bottom and panelProps.top then
         pHeight = screenH - pTop - panelProps.bottom
     end
@@ -1474,13 +1569,11 @@ local function isMouseInPanel(panelProps, screenW, screenH)
        and my >= pTop and my <= pTop + pHeight
 end
 
---- 检查鼠标是否在任何 UI 面板上（背包面板或塔详情面板）
 local function isMouseOverUIPanel()
     local dpr = graphics:GetDPR()
     local screenW = graphics:GetWidth() / dpr
     local screenH = graphics:GetHeight() / dpr
 
-    -- 检查背包面板（底部水平面板，position=absolute, bottom=动画值, left=60, right=60, height=INV_PANEL_HEIGHT）
     if (artifactPanelVisible_ or invAnimating_) and inventoryPanel_ then
         local panelLeft = 60
         local panelRight = screenW - 60
@@ -1496,7 +1589,6 @@ local function isMouseOverUIPanel()
         end
     end
 
-    -- 检查塔详情面板（动态定位，width=240, height≈220）
     if towerDetailVisible_ and towerDetailPanel_ and towerDetailPanel_.props then
         local tp = towerDetailPanel_.props
         if tp.top and tp.top > -9000 and tp.left and tp.left > -9000 then
@@ -1507,7 +1599,6 @@ local function isMouseOverUIPanel()
         end
     end
 
-    -- 检查建塔确认气泡（动态定位，约 56x76）
     if GS.placementPending and placementBubble_ and placementBubble_.props then
         local bp = placementBubble_.props
         if bp.top and bp.top > -9000 and bp.left and bp.left > -9000 then
@@ -1521,30 +1612,26 @@ local function isMouseOverUIPanel()
     return false
 end
 
---- 公开 API：供 Tower.lua 等外部模块查询
 function M.IsMouseOverUIPanel()
     return isMouseOverUIPanel()
 end
 
 -- ============================================================================
--- 圣器键盘操作（精简版：只保留 I 键和掉落快捷键）
+-- 键盘操作
 -- ============================================================================
 
 function M.HandleArtifactInput()
-    -- E 键切换布线模式
     if input:GetKeyPress(KEY_E) then
         local EnergyTower = require("EnergyTower")
         EnergyTower.ToggleWiringMode()
         return
     end
 
-    -- B 键切换背包面板
     if input:GetKeyPress(KEY_B) then
         M.ToggleArtifactPanel()
         return
     end
 
-    -- 掉落选择快捷键
     if dropOverlayVisible_ then
         if input:GetKeyPress(KEY_1) then M.OnDropPick(1); return end
         if input:GetKeyPress(KEY_2) then M.OnDropPick(2); return end
@@ -1553,22 +1640,17 @@ function M.HandleArtifactInput()
         return
     end
 
-    -- 左键点击：处理能源塔升级面板 / 塔详情面板 open / toggle / switch
     if input:GetMouseButtonPress(MOUSEB_LEFT) then
-        -- 如果鼠标在 UI 面板上，吞掉点击事件，不做任何关闭/切换
-        -- 这样拖拽圣器到面板槽位才能正常工作
         if isMouseOverUIPanel() then
             return
         end
 
-        -- 点击能源塔 (0,0) → 切换升级面板
         if GS.hoverOnMap and GS.hoverGX == 0 and GS.hoverGZ == 0 then
             M.ToggleUpgradePanel()
             return
         end
 
         if towerDetailVisible_ then
-            -- 面板已打开：检查是否切换到另一座塔
             if GS.hoverOnMap and not GS.hoverValid then
                 local Tower = require("Tower")
                 local idx = Tower.GetTowerAtHover()
@@ -1577,13 +1659,10 @@ function M.HandleArtifactInput()
                     return
                 end
             end
-            -- 点击非塔的空白区域 → 关闭面板
             M.HideTowerDetail()
-            -- 同时关闭升级面板
             if upgradePanelVisible_ then M.HideUpgradePanel() end
             return
         else
-            -- 面板未打开：点击塔 → 打开详情
             if GS.hoverOnMap and not GS.hoverValid then
                 local Tower = require("Tower")
                 local idx = Tower.GetTowerAtHover()
@@ -1594,11 +1673,9 @@ function M.HandleArtifactInput()
             end
         end
 
-        -- 点击空白区域，关闭升级面板
         if upgradePanelVisible_ then M.HideUpgradePanel() end
     end
 
-    -- Escape 关闭面板（优先关闭升级面板，再关闭塔详情，再关闭背包）
     if input:GetKeyPress(KEY_ESCAPE) then
         if upgradePanelVisible_ then
             M.HideUpgradePanel()
@@ -1616,35 +1693,39 @@ function M.HandleArtifactInput()
 end
 
 -- ============================================================================
--- GameOver / Victory
+-- GameOver / Victory (全中文 + 淡入动画)
 -- ============================================================================
 
 function M.ShowGameOver()
+    local titleLabel = UI.Label {
+        text = "游戏结束", fontSize = 36,
+        fontColor = CLR.danger,
+    }
     local overlay = UI.Panel {
         width = "100%", height = "100%",
         justifyContent = "center", alignItems = "center",
-        backgroundColor = { 0, 0, 0, 160 },
+        backgroundColor = { 0, 0, 0, 0 },
+        opacity = 0,
         children = {
             UI.Panel {
-                flexDirection = "column", alignItems = "center", gap = 12,
+                flexDirection = "column", alignItems = "center", gap = 14,
                 backgroundColor = { 30, 10, 10, 220 },
-                borderRadius = 12, paddingX = 40, paddingY = 30,
+                borderRadius = 14, paddingX = 44, paddingY = 34,
+                borderWidth = 1, borderColor = { 180, 40, 40, 120 },
+                boxShadow = {{ x = 0, y = 4, blur = 24, spread = 0, color = { 255, 0, 0, 40 } }},
                 children = {
+                    titleLabel,
                     UI.Label {
-                        text = "GAME OVER", fontSize = 36,
-                        fontColor = { 255, 60, 60, 255 },
-                    },
-                    UI.Label {
-                        text = string.format("Wave: %d/%d | Towers Built: %d | Monsters Killed: %d",
+                        text = string.format("波次: %d/%d  |  建塔: %d  |  击杀: %d",
                             GS.currentWave, 20, #GS.towers, GS.monstersKilled),
-                        fontSize = 16, fontColor = { 200, 200, 200, 220 },
+                        fontSize = 16, fontColor = CLR.secondary,
                     },
                     UI.Label {
-                        text = "Energy Tower Destroyed", fontSize = 14,
-                        fontColor = { 255, 180, 100, 200 },
+                        text = "能源塔被摧毁",
+                        fontSize = 14, fontColor = CLR.warning,
                     },
                     UI.Button {
-                        text = "Restart", variant = "primary",
+                        text = "重新开始", variant = "primary",
                         width = 160, height = 42, fontSize = 18,
                         onClick = function()
                             M.Shutdown()
@@ -1656,34 +1737,61 @@ function M.ShowGameOver()
         },
     }
     UI.SetRoot(overlay)
+
+    -- 淡入动画
+    overlay:Animate({
+        keyframes = {
+            [0] = { opacity = 0 },
+            [1] = { opacity = 1 },
+        },
+        duration = 0.5,
+        easing = "easeOut",
+        fillMode = "forwards",
+    })
+    -- 标题脉冲
+    titleLabel:Animate({
+        keyframes = {
+            [0]   = { scale = 0.7, opacity = 0 },
+            [0.6] = { scale = 1.1 },
+            [1]   = { scale = 1.0, opacity = 1 },
+        },
+        duration = 0.6,
+        easing = "easeOutBack",
+        fillMode = "forwards",
+        delay = 0.2,
+    })
 end
 
 function M.ShowVictory()
+    local titleLabel = UI.Label {
+        text = "胜利!", fontSize = 36,
+        fontColor = CLR.success,
+    }
     local overlay = UI.Panel {
         width = "100%", height = "100%",
         justifyContent = "center", alignItems = "center",
-        backgroundColor = { 0, 0, 0, 160 },
+        backgroundColor = { 0, 0, 0, 0 },
+        opacity = 0,
         children = {
             UI.Panel {
-                flexDirection = "column", alignItems = "center", gap = 12,
+                flexDirection = "column", alignItems = "center", gap = 14,
                 backgroundColor = { 10, 30, 10, 220 },
-                borderRadius = 12, paddingX = 40, paddingY = 30,
+                borderRadius = 14, paddingX = 44, paddingY = 34,
+                borderWidth = 1, borderColor = { 40, 180, 40, 120 },
+                boxShadow = {{ x = 0, y = 4, blur = 24, spread = 0, color = { 0, 255, 0, 40 } }},
                 children = {
+                    titleLabel,
                     UI.Label {
-                        text = "VICTORY!", fontSize = 36,
-                        fontColor = { 60, 255, 60, 255 },
-                    },
-                    UI.Label {
-                        text = string.format("All 20 waves cleared! | Towers: %d | Gold: %d",
+                        text = string.format("全部 20 波通关!  |  防御塔: %d  |  金币: %d",
                             #GS.towers, GS.gold),
                         fontSize = 16, fontColor = { 200, 255, 200, 220 },
                     },
                     UI.Label {
-                        text = "Congratulations, Commander!", fontSize = 14,
-                        fontColor = { 255, 220, 100, 200 },
+                        text = "恭喜指挥官!",
+                        fontSize = 14, fontColor = CLR.gold,
                     },
                     UI.Button {
-                        text = "Play Again", variant = "primary",
+                        text = "再来一局", variant = "primary",
                         width = 160, height = 42, fontSize = 18,
                         onClick = function()
                             M.Shutdown()
@@ -1695,6 +1803,29 @@ function M.ShowVictory()
         },
     }
     UI.SetRoot(overlay)
+
+    -- 淡入动画
+    overlay:Animate({
+        keyframes = {
+            [0] = { opacity = 0 },
+            [1] = { opacity = 1 },
+        },
+        duration = 0.5,
+        easing = "easeOut",
+        fillMode = "forwards",
+    })
+    -- 标题脉冲
+    titleLabel:Animate({
+        keyframes = {
+            [0]   = { scale = 0.7, opacity = 0 },
+            [0.6] = { scale = 1.15 },
+            [1]   = { scale = 1.0, opacity = 1 },
+        },
+        duration = 0.7,
+        easing = "easeOutBack",
+        fillMode = "forwards",
+        delay = 0.2,
+    })
 end
 
 function M.Shutdown()

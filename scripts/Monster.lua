@@ -561,14 +561,16 @@ end
 --- @param m table 怪物实例
 --- @param dmg number 伤害值
 --- @param isEnergyDmg boolean|nil 是否为能源伤害 (绕过物理护甲)
-function M.DamageMonster(m, dmg, isEnergyDmg)
+function M.DamageMonster(m, dmg, isEnergyDmg, skipText)
     if not m.node or m.hp <= 0 then return end
 
     -- 护盾先吸收 (所有伤害类型)
     if m.shield > 0 then
         if dmg <= m.shield then
             m.shield = m.shield - dmg
-            Utils.SpawnDmgText(m.node.position, dmg)
+            if not skipText then
+                Utils.SpawnDmgText(m.node.position, dmg)
+            end
             if m.shieldNode and m.shield <= 0 then
                 m.shieldNode:Remove()
                 m.shieldNode = nil
@@ -592,7 +594,9 @@ function M.DamageMonster(m, dmg, isEnergyDmg)
     dmg = math.max(1, math.floor(dmg + 0.5))
 
     m.hp = m.hp - dmg
-    Utils.SpawnDmgText(m.node.position, dmg)
+    if not skipText then
+        Utils.SpawnDmgText(m.node.position, dmg)
+    end
     if m.hp <= 0 then
         M.KillMonster(m)
     end
