@@ -150,23 +150,63 @@ local tooltipDownsideLabel_ = nil
 -- 圣器视觉映射
 -- ============================================================================
 
+-- 全圣器图标（1~2汉字缩写）
 local ARTIFACT_ICONS = {
-    fire_seed      = "火",
-    ice_crystal    = "冰",
-    coin_magnet    = "磁",
-    thunder        = "雷",
-    corrosion      = "蚀",
-    high_explosive = "爆",
+    -- 攻击类
+    rapid_fire_module  = "速射",
+    fire_seed          = "火种",
+    ice_crystal        = "冰晶",
+    corrosion          = "腐蚀",
+    thunder            = "雷鸣",
+    splinter           = "裂片",
+    piercing_core      = "穿透",
+    sniper_mod         = "狙击",
+    prism              = "棱镜",
+    high_explosive     = "高爆",
+    crit_device        = "暴击",
+    resonance_trigger  = "共振",
+    elemental_core     = "元素",
+    -- 增益类
+    aura_attack_speed  = "攻环",
+    aura_damage        = "伤环",
+    aura_range         = "程环",
+    aura_crit          = "暴环",
+    range_compression  = "远压",
+    power_borrow       = "借力",
+    master_tower       = "总管",
+    defense_garrison   = "防阵",
+    network            = "网络",
+    devour_line        = "吞线",
+    ice_crystal_conduit = "冰管",
+    resonance_amplifier = "放大",
+    elemental_reaction = "元反",
+    overload_relay     = "过载",
+    energy_ammo        = "注能",
+    -- 收集类
+    coin_magnet        = "磁币",
+    gold_refinery      = "炼金",
+    energy_matrix      = "充能",
+    charged_hit        = "蓄力",
+    condenser          = "凝聚",
+    resource_enrichment = "富集",
+    compound_interest  = "复利",
+    feedback_coil      = "反馈",
 }
 
-local ARTIFACT_BG = {
-    fire_seed      = { 60, 20, 10, 230 },
-    ice_crystal    = { 15, 30, 60, 230 },
-    coin_magnet    = { 45, 40, 10, 230 },
-    thunder        = { 30, 20, 55, 230 },
-    corrosion      = { 20, 40, 15, 230 },
-    high_explosive = { 55, 25, 10, 230 },
+-- 背景色按 category 区分: 攻击=暗红, 增益=深蓝, 收集=暗绿
+local _CAT_BG = {
+    attack     = { 70, 20, 15, 230 },
+    buff       = { 15, 25, 70, 230 },
+    collection = { 15, 55, 25, 230 },
 }
+
+local function artifactBg(def)
+    if not def then return { 30, 30, 50, 230 } end
+    return _CAT_BG[def.category] or { 30, 30, 50, 230 }
+end
+
+-- 保留旧表兼容（空，逻辑改用 artifactBg()）
+local ARTIFACT_BG = {}
 
 local function rarityColor(rarity)
     return Artifact.RARITY_COLORS[rarity] or { 200, 200, 200, 255 }
@@ -716,7 +756,7 @@ function M.BuildInventoryPanel()
             end
             if not entry then goto continue end
 
-            local icon = ARTIFACT_ICONS[entry.id] or "?"
+            local icon = ARTIFACT_ICONS[entry.id] or entry.def.name:sub(1, 4)
             local rc = rarityColor(entry.def.rarity)
             local totalCount = g.unequippedCount + g.equippedCount
 
@@ -1356,7 +1396,7 @@ function M.RefreshTowerDetail()
                     slot:SetItem({
                         id = entry.id,
                         name = entry.def.name,
-                        icon = ARTIFACT_ICONS[entry.id] or "?",
+                        icon = ARTIFACT_ICONS[entry.id] or entry.def.name:sub(1, 4),
                         type = "artifact",
                         invIndex = invIdx,
                     })
@@ -1731,8 +1771,8 @@ function M.ShowDropOverlay()
         local def = cand.def
         local rc = rarityColor(def.rarity)
         local bc = rarityBorderColor(def.rarity)
-        local bg = ARTIFACT_BG[def.id] or { 25, 30, 45, 230 }
-        local icon = ARTIFACT_ICONS[def.id] or "?"
+        local bg = artifactBg(def)
+        local icon = ARTIFACT_ICONS[def.id] or def.name:sub(1, 4) or "?"
 
         local dsText = ""
         for _, ds in ipairs(def.downsides) do
