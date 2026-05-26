@@ -134,6 +134,23 @@ function M.PlaceEnergyTower()
     platformModel.castShadows = true
 
     -- ================================================================
+    -- 底部发光边环 (始终显示, 金琥珀色与能源塔主题一致)
+    -- ================================================================
+    local etGlowRing = node:CreateChild("ETGlowRing")
+    etGlowRing.position = Vector3(0, 0.07, 0)
+    etGlowRing.scale = Vector3(0.65, 0.22, 0.65)
+    local etGlowModel = etGlowRing:CreateComponent("StaticModel")
+    etGlowModel:SetModel(cache:GetResource("Model", "Models/Torus.mdl"))
+    local etGlowMat = Material:new()
+    etGlowMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+    etGlowMat:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.8, 0.3, 0.75)))
+    etGlowMat:SetShaderParameter("MatEmissiveColor", Variant(Color(2.0, 1.5, 0.5)))
+    etGlowMat:SetShaderParameter("Metallic", Variant(0.6))
+    etGlowMat:SetShaderParameter("Roughness", Variant(0.2))
+    etGlowModel:SetMaterial(etGlowMat)
+    etGlowModel.castShadows = false
+
+    -- ================================================================
     -- 圆形底座（在方形平台上方）
     -- ================================================================
     local baseChild = node:CreateChild("ETBase")
@@ -223,6 +240,12 @@ function M.PlaceEnergyTower()
     ring3Model:SetModel(cache:GetResource("Model", "Models/Torus.mdl"))
     ring3Model:SetMaterial(ringMat3)
     GS.etRingNodes[3] = ring3
+    -- 保存环材质引用（用于受伤泛红）
+    GS.etRingMats = {
+        { mat = ringMat,  baseR = 0.6, baseG = 1.6, baseB = 2.2 },
+        { mat = ringMat2, baseR = 0.9, baseG = 1.2, baseB = 2.5 },
+        { mat = ringMat3, baseR = 1.5, baseG = 1.8, baseB = 2.8 },
+    }
 
     -- ================================================================
     -- 顶部水晶冠（会旋转）
@@ -364,23 +387,10 @@ function M.PlaceEnergyTower()
     local barW = CONFIG.EnergyTowerHPBarW
     local barH = CONFIG.EnergyTowerHPBarH
 
-    -- 外框（白色亮边，略大于背景）
-    local frame = GS.etHPBg:CreateChild("ETHPFrame")
-    frame.scale = Vector3(barW + 0.08, barH + 0.06, 0.008)
-    local frameModel = frame:CreateComponent("StaticModel")
-    frameModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
-    local frameMat = Material:new()
-    frameMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    frameMat:SetShaderParameter("MatDiffColor", Variant(Color(0.9, 0.95, 1.0, 1.0)))
-    frameMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 0.7, 0.8)))
-    frameMat:SetShaderParameter("Metallic", Variant(0.3))
-    frameMat:SetShaderParameter("Roughness", Variant(0.4))
-    frameModel:SetMaterial(frameMat)
-
-    -- 黑色背景
+    -- 深色背景
     local bg = GS.etHPBg:CreateChild("ETHPBg")
     bg.scale = Vector3(barW, barH, 0.01)
-    bg.position = Vector3(0, 0, 0.002)
+    bg.position = Vector3(0, 0, 0)
     local bgModel = bg:CreateComponent("StaticModel")
     bgModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
     bgModel:SetMaterial(Utils.GetHPBgMaterial())
@@ -388,17 +398,32 @@ function M.PlaceEnergyTower()
     -- 填充条（更亮的绿色 + 更强发光）
     GS.etHPFill = GS.etHPBg:CreateChild("ETHPFill")
     GS.etHPFill.scale = Vector3(barW * 0.98, barH * 0.7, 0.015)
-    GS.etHPFill.position = Vector3(0, 0, 0.006)
+    GS.etHPFill.position = Vector3(0, 0, -0.006)
     local fillModel = GS.etHPFill:CreateComponent("StaticModel")
     fillModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
 
     GS.etFillMat = Material:new()
     GS.etFillMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.15, 1.0, 0.15, 1.0)))
-    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.1, 0.8, 0.1)))
+    GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.882, 0.224, 0.224, 1.0)))
+    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 0.0, 0.0)))
     GS.etFillMat:SetShaderParameter("Metallic", Variant(0.0))
-    GS.etFillMat:SetShaderParameter("Roughness", Variant(0.4))
+    GS.etFillMat:SetShaderParameter("Roughness", Variant(1.0))
     fillModel:SetMaterial(GS.etFillMat)
+
+    -- ⚡ 能源总数标签（跟随血条节点，显示在血条正上方）
+    local etLabelNode = GS.etHPBg:CreateChild("ETEnergyLabel")
+    etLabelNode.position = Vector3(0, 0.22, 0)
+    local etLabel = etLabelNode:CreateComponent("Text3D")
+    etLabel:SetFont("Fonts/MiSans-Regular.ttf", 22)
+    etLabel:SetText("⚡" .. M.GetTotalPower())
+    etLabel:SetColor(Color(0.35, 0.90, 1.0, 1.0))
+    etLabel:SetAlignment(HA_CENTER, VA_CENTER)
+    etLabel:SetFaceCameraMode(FC_ROTATE_XYZ)
+    etLabel:SetTextEffect(TE_STROKE)
+    etLabel:SetEffectStrokeThickness(2)
+    etLabel:SetEffectColor(Color(0.0, 0.05, 0.2, 0.9))
+    etLabel.fixedScreenSize = true
+    GS.etEnergyLabel = etLabel
 end
 
 -- ============================================================================
@@ -414,18 +439,15 @@ function M.UpdateEnergyTowerHP()
     local fillW = fullW * ratio
     GS.etHPFill.scale = Vector3(fillW, CONFIG.EnergyTowerHPBarH * 0.7, 0.015)
     local offset = (fullW - fillW) * 0.5
-    GS.etHPFill.position = Vector3(-offset, 0, 0.006)
+    GS.etHPFill.position = Vector3(-offset, 0, -0.006)
 
-    local r, g
-    if ratio > 0.5 then
-        r = (1.0 - ratio) * 2.0
-        g = 1.0
-    else
-        r = 1.0
-        g = ratio * 2.0
+    GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.882, 0.224, 0.224, 1.0)))
+    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 0.0, 0.0)))
+
+    -- 同步能源标签文字（升级后能源数变化）
+    if GS.etEnergyLabel then
+        GS.etEnergyLabel:SetText("⚡" .. M.GetTotalPower())
     end
-    GS.etFillMat:SetShaderParameter("MatDiffColor", Variant(Color(r, g, 0.1, 1.0)))
-    GS.etFillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(r * 0.5, g * 0.5, 0.03)))
 end
 
 -- ============================================================================
@@ -433,6 +455,7 @@ end
 -- ============================================================================
 local etCrystalYaw_ = 0
 local etRingYaws_ = { 0, 0, 0 }
+local etFlashTimer_ = 0  -- 受伤泛红计时器
 -- 环旋转速度（度/秒）：底环慢、中环中速反转、顶环快
 local RING_SPEEDS = { 25, -40, 55 }
 -- 环的基础倾斜（初始旋转保持）
@@ -463,12 +486,32 @@ function M.UpdateEnergyTowerAnim(dt)
             end
         end
     end
+
+    -- 受伤泛红帧更新（对旋转能量环发光色做红闪）
+    if etFlashTimer_ > 0 and GS.etRingMats then
+        etFlashTimer_ = etFlashTimer_ - dt
+        local t = math.max(0, etFlashTimer_ / 0.22)  -- 1.0 → 0.0 衰减
+        for _, entry in ipairs(GS.etRingMats) do
+            entry.mat:SetShaderParameter("MatEmissiveColor", Variant(Color(
+                entry.baseR + (3.5 - entry.baseR) * t,
+                entry.baseG * (1.0 - t * 0.9),
+                entry.baseB * (1.0 - t * 0.9)
+            )))
+        end
+        if etFlashTimer_ <= 0 then
+            -- 恢复基础发光色
+            for _, entry in ipairs(GS.etRingMats) do
+                entry.mat:SetShaderParameter("MatEmissiveColor", Variant(Color(entry.baseR, entry.baseG, entry.baseB)))
+            end
+        end
+    end
 end
 
 function M.DamageEnergyTower(dmg)
     if GS.gameOver then return end
     GS.etHP = GS.etHP - dmg
     Utils.SpawnDmgText(Vector3(0, 3.0, 0), dmg)
+    etFlashTimer_ = 0.22  -- 触发泛红
     if GS.etHP <= 0 then
         GS.etHP = 0
         GS.gameOver = true
@@ -706,13 +749,15 @@ function M.PropagatePower()
             local numChildren = #treeNode.childKeys
 
             if numChildren > 0 then
-                -- 功率均分给子节点
-                local childPower = curPower / numChildren
+                -- 先均分，再扣除每段线的衰减消耗
+                -- 公式: child能量 = (当前节点能量 ÷ 子节点数) - PowerDrainPerSegment
+                local sharedPower = curPower / numChildren
+                local childPower = math.max(0, sharedPower - CONFIG.PowerDrainPerSegment)
 
                 for _, childKey in ipairs(treeNode.childKeys) do
                     net.nodePower[childKey] = childPower
 
-                    -- 记录边上的功率
+                    -- 记录边上的功率（用于能源线视觉亮度等）
                     local cx, cz = ParseNodeKey(curKey)
                     local chx, chz = ParseNodeKey(childKey)
                     local eKey = EdgeKey(cx, cz, chx, chz)
@@ -724,7 +769,7 @@ function M.PropagatePower()
         end
     end
 
-    -- 更新塔的激活状态和功率
+    -- 更新塔的激活状态和功率，并同步能量标签
     for _, t in ipairs(GS.towers) do
         local tKey = NodeKey(t.gx, t.gz)
         local pwr = net.nodePower[tKey]
@@ -738,6 +783,10 @@ function M.PropagatePower()
             t.delivered = 0
             t.linePwr = 0
             t.ratio = 0
+        end
+        -- 更新 ⚡ 标签
+        if t.energyLabel then
+            t.energyLabel:SetText("⚡" .. math.floor(t.delivered + 0.5))
         end
     end
 end
@@ -858,6 +907,17 @@ end
 local wiringPath_ = nil      -- 拖拽期间累计的路径 cell 列表 {{gx,gz}, ...}
 local wiringLastCell_ = nil   -- 上一帧鼠标所在的格子 {gx, gz}
 local wiringEdgeSet_ = nil    -- 拖拽期间累计的边 key → true (去重用)
+local wiringCellIndex_ = nil  -- path 中每个 cell 的索引: "gx,gz" → index (用于回溯检测)
+
+-- 橡皮擦拖拽状态
+local eraserLastCell_ = nil   -- 右键拖拽上一帧格子
+local eraserActive_ = false   -- 右键拖拽中
+local eraserRemovedCount_ = 0 -- 本次拖拽删除的边数
+
+-- 导线放置弹跳动画
+local wireAnims_ = {}         -- { node, t, delay, startY, targetY } 列表
+local WIRE_ANIM_DUR = 0.40
+local WIRE_ANIM_DROP_H = 0.45 -- 从多高落下
 
 --- 将 (fromX,fromZ) 到 (toX,toZ) 之间跳过的格子填充进 wiringPath_
 local function FillGapCells(fromX, fromZ, toX, toZ)
@@ -1030,31 +1090,52 @@ function M.HandleWiringInput()
         end
     end
 
-    -- 右键删除: 删经过此格的所有边
+    -- 右键橡皮擦: 按下开始，拖拽持续擦除，释放结束
     if input:GetMouseButtonPress(MOUSEB_RIGHT) then
+        eraserActive_ = true
+        eraserLastCell_ = nil
+        eraserRemovedCount_ = 0
+    end
+
+    if eraserActive_ and input:GetMouseButtonDown(MOUSEB_RIGHT) then
         if gx and gz then
-            local dirs = { {0, 1}, {0, -1}, {1, 0}, {-1, 0} }
-            local removed = 0
-            for _, d in ipairs(dirs) do
-                local nx, nz = gx + d[1], gz + d[2]
-                local eKey = EdgeKey(gx, gz, nx, nz)
-                if GS.energyGraph.edges[eKey] then
-                    M.RemoveEdge(gx, gz, nx, nz)
-                    removed = removed + 1
+            local cellKey = NodeKey(gx, gz)
+            local lastKey = eraserLastCell_ and NodeKey(eraserLastCell_[1], eraserLastCell_[2])
+            if cellKey ~= lastKey then
+                -- 擦除经过此格的所有边
+                local dirs = { {0, 1}, {0, -1}, {1, 0}, {-1, 0} }
+                local removed = 0
+                for _, d in ipairs(dirs) do
+                    local nx, nz = gx + d[1], gz + d[2]
+                    local eKey = EdgeKey(gx, gz, nx, nz)
+                    if GS.energyGraph.edges[eKey] then
+                        M.RemoveEdge(gx, gz, nx, nz)
+                        removed = removed + 1
+                    end
                 end
-            end
-            if removed > 0 then
-                -- 返还金币
-                local refundGold = math.floor(removed * CONFIG.LineCostPerSegment * CONFIG.LineRefundRatio + 0.5)
-                GS.gold = GS.gold + refundGold
-                print(string.format("[Wiring] Removed %d edges at (%d,%d) → refund %d gold",
-                    removed, gx, gz, refundGold))
-                M.RecalculatePowerFlow()
-                M.RebuildAllVisuals()
-                local Tower = require("Tower")
-                Tower.UpdateAllActivationVisuals()
+                if removed > 0 then
+                    local refundGold = math.floor(removed * CONFIG.LineCostPerSegment * CONFIG.LineRefundRatio + 0.5)
+                    GS.gold = GS.gold + refundGold
+                    Utils.SpawnCoinText(Vector3(gx, 0, gz), refundGold)
+                    eraserRemovedCount_ = eraserRemovedCount_ + removed
+                    M.RecalculatePowerFlow()
+                    M.RebuildAllVisuals()
+                    local Tower = require("Tower")
+                    Tower.UpdateAllActivationVisuals()
+                end
+                eraserLastCell_ = {gx, gz}
             end
         end
+        return
+    end
+
+    if eraserActive_ and not input:GetMouseButtonDown(MOUSEB_RIGHT) then
+        if eraserRemovedCount_ > 0 then
+            print(string.format("[Wiring] Eraser: removed %d edges total", eraserRemovedCount_))
+        end
+        eraserActive_ = false
+        eraserLastCell_ = nil
+        eraserRemovedCount_ = 0
         return
     end
 
@@ -1066,29 +1147,58 @@ function M.HandleWiringInput()
             wiringPath_ = { {gx, gz} }
             wiringLastCell_ = {gx, gz}
             wiringEdgeSet_ = {}
+            wiringCellIndex_ = { [NodeKey(gx, gz)] = 1 }
         end
         return
     end
 
-    -- 左键拖拽中: 追踪鼠标所在格子, 逐格延伸路径
+    -- 左键拖拽中: 追踪鼠标所在格子, 逐格延伸路径 (支持回溯撤销)
     if input:GetMouseButtonDown(MOUSEB_LEFT) and GS.wiringStart and wiringLastCell_ then
         if gx and gz then
             local lx, lz = wiringLastCell_[1], wiringLastCell_[2]
             if gx ~= lx or gz ~= lz then
-                local dx = math.abs(gx - lx)
-                local dz = math.abs(gz - lz)
-
-                if dx + dz == 1 then
-                    table.insert(wiringPath_, {gx, gz})
-                    local key = EdgeKey(lx, lz, gx, gz)
-                    wiringEdgeSet_[key] = true
+                -- 检测回溯：鼠标进入了路径中已存在的格子
+                local cellKey = NodeKey(gx, gz)
+                local existIdx = wiringCellIndex_ and wiringCellIndex_[cellKey]
+                if existIdx then
+                    -- 截断路径到该位置（撤销后续段）
+                    -- 移除 existIdx+1 之后的所有格子
+                    for i = #wiringPath_, existIdx + 1, -1 do
+                        local removed = wiringPath_[i]
+                        wiringCellIndex_[NodeKey(removed[1], removed[2])] = nil
+                        table.remove(wiringPath_, i)
+                    end
+                    -- 重建 edgeSet
+                    wiringEdgeSet_ = {}
+                    for i = 1, #wiringPath_ - 1 do
+                        local a = wiringPath_[i]
+                        local b = wiringPath_[i + 1]
+                        wiringEdgeSet_[EdgeKey(a[1], a[2], b[1], b[2])] = true
+                    end
                     wiringLastCell_ = {gx, gz}
+                    RebuildPreviewFromEdges()
                 else
-                    FillGapCells(lx, lz, gx, gz)
-                    wiringLastCell_ = {gx, gz}
-                end
+                    -- 正常延伸
+                    local dx = math.abs(gx - lx)
+                    local dz = math.abs(gz - lz)
 
-                RebuildPreviewFromEdges()
+                    if dx + dz == 1 then
+                        table.insert(wiringPath_, {gx, gz})
+                        wiringCellIndex_[cellKey] = #wiringPath_
+                        local key = EdgeKey(lx, lz, gx, gz)
+                        wiringEdgeSet_[key] = true
+                        wiringLastCell_ = {gx, gz}
+                    else
+                        FillGapCells(lx, lz, gx, gz)
+                        -- 更新 cellIndex（FillGapCells 已追加到 wiringPath_）
+                        for i = 1, #wiringPath_ do
+                            local c = wiringPath_[i]
+                            wiringCellIndex_[NodeKey(c[1], c[2])] = i
+                        end
+                        wiringLastCell_ = {gx, gz}
+                    end
+                    RebuildPreviewFromEdges()
+                end
             end
         end
         return
@@ -1122,6 +1232,10 @@ function M.HandleWiringInput()
 
                     -- 扣金，添加边
                     GS.gold = GS.gold - totalCost
+                    -- 在路径中点显示金币消耗
+                    local midIdx = math.max(1, math.floor(#wiringPath_ / 2))
+                    local midCell = wiringPath_[midIdx]
+                    Utils.SpawnCoinText(Vector3(midCell[1], 0, midCell[2]), -totalCost)
                     for key, _ in pairs(newEdges) do
                         local x1, z1, x2, z2 = ParseEdgeKey(key)
                         M.AddEdge(x1, z1, x2, z2)
@@ -1129,7 +1243,8 @@ function M.HandleWiringInput()
 
                     -- 重算功率
                     M.RecalculatePowerFlow()
-                    M.RebuildAllVisuals()
+                    -- 传入新边和路径用于弹跳动画
+                    M.RebuildAllVisuals(newEdges, wiringPath_)
 
                     local Tower = require("Tower")
                     Tower.UpdateAllActivationVisuals()
@@ -1147,6 +1262,7 @@ function M.HandleWiringInput()
         wiringPath_ = nil
         wiringLastCell_ = nil
         wiringEdgeSet_ = nil
+        wiringCellIndex_ = nil
         return
     end
 end
@@ -1160,6 +1276,9 @@ function M.ToggleWiringMode()
         wiringPath_ = nil
         wiringLastCell_ = nil
         wiringEdgeSet_ = nil
+        wiringCellIndex_ = nil
+        eraserActive_ = false
+        eraserLastCell_ = nil
         GS.wiringHintMsg = nil
     end
     -- 切换布线模式时取消待确认的建塔加号
@@ -1176,7 +1295,9 @@ end
 local shortCircuitMat_ = nil
 local disconnectedMat_ = nil
 
-function M.RebuildAllVisuals()
+--- @param newEdgeKeys table|nil 本次新放置的边 key → true (用于弹跳动画)
+--- @param placePath table|nil  本次画线路径 {{gx,gz},...} (用于计算弹跳延迟顺序)
+function M.RebuildAllVisuals(newEdgeKeys, placePath)
     -- 清除旧可视化
     if GS.linesNode then
         GS.linesNode:Remove()
@@ -1188,19 +1309,31 @@ function M.RebuildAllVisuals()
     end
     GS.pulses = {}
     GS.lineMat = nil
+    wireAnims_ = {}  -- 重置弹跳动画
+
+    -- 为新边计算沿路径的顺序索引 (用于级联延迟)
+    local edgeOrder = {}  -- edgeKey → order index (0-based)
+    if newEdgeKeys and placePath and #placePath >= 2 then
+        local orderIdx = 0
+        for i = 1, #placePath - 1 do
+            local a = placePath[i]
+            local b = placePath[i + 1]
+            local ek = EdgeKey(a[1], a[2], b[1], b[2])
+            if newEdgeKeys[ek] and not edgeOrder[ek] then
+                edgeOrder[ek] = orderIdx
+                orderIdx = orderIdx + 1
+            end
+        end
+    end
 
     local graph = GS.energyGraph
     if graph.edgeCount == 0 then return end
 
     GS.linesNode = GS.scene:CreateChild("EnergyLines")
 
-    -- 正常连通材质 (蓝色发光)
-    GS.lineMat = Material:new()
-    GS.lineMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    GS.lineMat:SetShaderParameter("MatDiffColor", Variant(Color(0.25, 0.55, 0.85, 1.0)))
-    GS.lineMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.5, 1.0, 1.5)))
-    GS.lineMat:SetShaderParameter("Metallic", Variant(0.0))
-    GS.lineMat:SetShaderParameter("Roughness", Variant(1.0))
+    -- 每条边独立材质（用于渐变色 + 分别呼吸动画）
+    GS.lineMat = nil  -- 不再使用单一共享材质
+    GS.edgeMats = {}  -- eKey → { mat, eR, eG, eB }
 
     -- 短路材质 (红色闪烁)
     shortCircuitMat_ = Material:new()
@@ -1220,6 +1353,36 @@ function M.RebuildAllVisuals()
 
     local boxMdl = cache:GetResource("Model", "Models/Box.mdl")
     local net = GS.energyNetwork
+    local totalPower = math.max(1, M.GetTotalPower())
+
+    -- 按功率绝对值映射颜色：能量多 = 深蓝，能量少 = 白
+    -- 分叉后各支路功率减半，颜色自然变淡，玩家可直观看到能量分布
+    -- 使用 sqrt 感知线性化：让中间段颜色差异更大、视觉更均匀
+    --   t = sqrt(edgePower / totalPower)
+    --   t=1.0 → 全功率（紧邻 ET / 无分叉）→ 极深蓝 + 强发光
+    --   t=0.5 → 二分叉后第一段 (~50% 功率)    → 中蓝
+    --   t=0.3 → 四分叉或长路径末端            → 淡蓝
+    --   t=0.0 → 断电                          → 白色
+
+    local function MakeEdgeMat(edgePower)
+        local raw = math.max(0, math.min(1, edgePower / totalPower))
+        local t = math.sqrt(raw)   -- sqrt 感知线性化
+        -- Diffuse：纯白 → 极深蓝（高饱和，低 R/G）
+        local r = 0.95 - 0.93 * t  -- 0.95(白) → 0.02(深蓝)
+        local g = 0.95 - 0.90 * t  -- 0.95(白) → 0.05
+        local b = 1.0
+        -- Emissive：无发光 → 极强蓝发光（高能端 eB 达 5.0，视觉极蓝）
+        local eR = 0.05 - 0.03 * t  -- 0.05 → 0.02
+        local eG = 0.05 + 1.15 * t  -- 0.05 → 1.20
+        local eB = 0.10 + 4.90 * t  -- 0.10 → 5.0
+        local mat = Material:new()
+        mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+        mat:SetShaderParameter("MatDiffColor", Variant(Color(r, g, b, 1.0)))
+        mat:SetShaderParameter("MatEmissiveColor", Variant(Color(eR, eG, eB)))
+        mat:SetShaderParameter("Metallic", Variant(0.0))
+        mat:SetShaderParameter("Roughness", Variant(1.0))
+        return mat, eR, eG, eB
+    end
 
     -- 判断边所在的连通分量是否包含源节点 (0,0)
     local function isEdgeConnected(eKey)
@@ -1234,26 +1397,49 @@ function M.RebuildAllVisuals()
         local lineNode = GS.linesNode:CreateChild("Line")
         lineNode.position = Vector3(midX, LINE_Y, midZ)
 
+        local scaleX, scaleZ
         if edge.isHoriz then
-            local lenX = math.abs(edge.x2 - edge.x1) + LINE_WIDTH
-            lineNode.scale = Vector3(lenX, LINE_THICK, LINE_WIDTH)
+            scaleX = math.abs(edge.x2 - edge.x1) + LINE_WIDTH
+            scaleZ = LINE_WIDTH
         else
-            local lenZ = math.abs(edge.z2 - edge.z1) + LINE_WIDTH
-            lineNode.scale = Vector3(LINE_WIDTH, LINE_THICK, lenZ)
+            scaleX = LINE_WIDTH
+            scaleZ = math.abs(edge.z2 - edge.z1) + LINE_WIDTH
         end
+        lineNode.scale = Vector3(scaleX, LINE_THICK, scaleZ)
 
         local model = lineNode:CreateComponent("StaticModel")
         model:SetModel(boxMdl)
 
-        -- 三层着色
+        -- 三层着色（连通边使用功率绝对值渐变材质）
         if GS.shortCircuit.active then
             model:SetMaterial(shortCircuitMat_)
         elseif isEdgeConnected(eKey) then
-            model:SetMaterial(GS.lineMat)
+            local edgePwr = net.edgePower[eKey] or 0
+            local mat, eR, eG, eB = MakeEdgeMat(edgePwr)
+            model:SetMaterial(mat)
+            GS.edgeMats[eKey] = { mat = mat, eR = eR, eG = eG, eB = eB }
         else
             model:SetMaterial(disconnectedMat_)
         end
         model.castShadows = false
+
+        -- 新边弹跳动画
+        local order = edgeOrder[eKey]
+        if order then
+            local delay = order * 0.06  -- 级联延迟
+            local startY = LINE_Y + WIRE_ANIM_DROP_H
+            lineNode.position = Vector3(midX, startY, midZ)
+            lineNode.scale = Vector3(scaleX * 0.7, LINE_THICK * 0.4, scaleZ * 0.7) -- 初始压缩
+            table.insert(wireAnims_, {
+                node = lineNode,
+                t = 0,
+                delay = delay,
+                targetY = LINE_Y,
+                startY = startY,
+                scaleX = scaleX,
+                scaleZ = scaleZ,
+            })
+        end
     end
 
     -- 转角方块
@@ -1289,7 +1475,10 @@ function M.RebuildAllVisuals()
         if GS.shortCircuit.active then
             model:SetMaterial(shortCircuitMat_)
         else
-            model:SetMaterial(GS.lineMat)
+            -- 转角节点颜色：用该节点的功率值
+            local nodePwr = net.nodePower[nk] or 0
+            local mat = MakeEdgeMat(nodePwr)
+            model:SetMaterial(mat)
         end
         model.castShadows = false
     end
@@ -1303,6 +1492,8 @@ function M.RebuildAllVisuals()
         junctionMat:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.3, 0.2, 1.0)))
         junctionMat:SetShaderParameter("MatEmissiveColor", Variant(Color(2.0, 0.5, 0.3)))
     else
+        -- 分叉节点用其节点功率渐变色（略微亮一点）
+        local nodePwr = net.nodePower[NodeKey(graph.nodes and 0 or 0, 0)] or totalPower
         junctionMat:SetShaderParameter("MatDiffColor", Variant(Color(0.35, 0.70, 1.0, 1.0)))
         junctionMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.8, 1.5, 2.5)))
     end
@@ -1445,87 +1636,147 @@ local function PointToSegmentDist(px, pz, ax, az, bx, bz)
     return math.sqrt(ex * ex + ez * ez)
 end
 
--- 能源线伤害专用颜色（青蓝色，区别于塔伤的黄色）
+-- ============================================================================
+-- 能源线伤害 (tick 系统)
+-- 公式: dmg/tick = ET升级倍率 × 局外基础倍率 × 圣器倍率 × 技能倍率 × 短路倍率
+-- Lv.1 无加成: 1 伤害/tick (0.1s) = DPS 10
+-- ============================================================================
 local LINE_DMG_COLOR = Color(0.3, 0.9, 1.0, 1.0)
 local LINE_DMG_STROKE = Color(0.0, 0.15, 0.3, 0.9)
--- 每只怪的伤害累积 & 冷却计时器（最小结算间隔 0.5 秒）
-local LINE_DMG_INTERVAL = 0.5
-local lineDmgAccum_ = {}  -- id → { dmg=累积伤害, cd=冷却剩余 }
+
+local LINE_TICK_NORMAL = 0.10   -- 正常: 每 0.1s 结算一次伤害
+local LINE_TICK_SC     = 0.05   -- 短路: 每 0.05s 结算一次伤害
+local LINE_SHOW_NORMAL = 0.50   -- 正常: 每 0.5s 弹出数字
+local LINE_SHOW_SC     = 0.25   -- 短路: 每 0.25s 弹出数字
+local LINE_SC_MULT     = 10.0   -- 短路时线伤倍率
+
+local lineDmgTickTimer_ = 0     -- 全局 tick 倒计时
+local lineDmgDisplay_   = {}    -- id → { accum=待显示累积伤害, cd=显示冷却剩余 }
+
+-- 获取能源塔升级对线伤的倍率
+function M.GetLineDmgETMult()
+    return M.GetLevelStats().lineDmgMult or 1.0
+end
+
+-- 获取圣器对线伤的增益倍率 (扫描所有已装备圣器的 line_damage stat)
+local function GetLineDmgArtifactMult()
+    local mult = 1.0
+    for _, entry in ipairs(GS.artifactInventory) do
+        if entry.equipped and entry.def then
+            for _, eff in ipairs(entry.def.effects or {}) do
+                if eff.type == "stat_modifier" and eff.stat == "line_damage" then
+                    mult = mult * (1.0 + eff.modifier)
+                end
+            end
+            for _, ds in ipairs(entry.def.downsides or {}) do
+                if ds.type == "stat_modifier" and ds.stat == "line_damage" then
+                    mult = mult * (1.0 + ds.modifier)
+                end
+            end
+        end
+    end
+    return mult
+end
 
 function M.UpdateLineDamage(dt)
     local graph = GS.energyGraph
-    local net = GS.energyNetwork
-
+    local net   = GS.energyNetwork
     if graph.edgeCount == 0 then return end
-    if GS.shortCircuit.active then return end  -- 短路时不造成伤害
 
-    local hitRadius = CONFIG.LineHitRadius
-    local dmgCoeff = CONFIG.CircuitDmgCoeff
-    local convEff = M.GetConvEff()
-    local Monster = require("Monster")
+    local isShortCircuit = GS.shortCircuit.active
+    local tickInterval   = isShortCircuit and LINE_TICK_SC     or LINE_TICK_NORMAL
+    local showInterval   = isShortCircuit and LINE_SHOW_SC     or LINE_SHOW_NORMAL
+    local scMult         = isShortCircuit and LINE_SC_MULT     or 1.0
 
-    for _, m in ipairs(GS.monsters) do
-        if m.node and m.hp > 0 then
+    -- 推进全局 tick 计时器
+    lineDmgTickTimer_ = lineDmgTickTimer_ + dt
+    if lineDmgTickTimer_ >= tickInterval then
+        lineDmgTickTimer_ = lineDmgTickTimer_ - tickInterval
+
+        -- 本 tick 伤害量 = ET倍率 × 局外倍率 × 圣器倍率 × 技能倍率 × 短路倍率
+        local dmgPerTick = M.GetLineDmgETMult()
+                         * (GS.lineDmgBaseMult  or 1.0)
+                         * GetLineDmgArtifactMult()
+                         * (GS.lineDmgSkillMult or 1.0)
+                         * scMult
+
+        local hitRadius = CONFIG.LineHitRadius
+        local Monster   = require("Monster")
+
+        for _, m in ipairs(GS.monsters) do
+            if not (m.node and m.hp > 0) then goto continue_monster end
             if m.lineImmune then goto continue_monster end
 
             local mx = m.node.position.x
             local mz = m.node.position.z
 
-            local totalDps = 0
-
-            -- 检查每条有功率的边
+            -- 判断是否踩在任意有功率的线段上
+            local onLine = false
             for eKey, edge in pairs(graph.edges) do
                 local edgePwr = net.edgePower[eKey]
                 if edgePwr and edgePwr > 0 then
-                    local d = PointToSegmentDist(mx, mz, edge.x1, edge.z1, edge.x2, edge.z2)
-                    if d < hitRadius then
-                        -- DPS = edgePower × dmgCoeff × convEff × 0.05
-                        -- edgePower 已是该边分配的功率; ×0.05 归一化到合理 DPS
-                        -- Lv1 单边 edgePwr≈50 → 50×8×1×0.05 = 20 DPS
-                        totalDps = totalDps + edgePwr * dmgCoeff * convEff * 0.05
+                    if PointToSegmentDist(mx, mz, edge.x1, edge.z1, edge.x2, edge.z2) < hitRadius then
+                        onLine = true
+                        break
                     end
                 end
             end
 
-            if totalDps > 0 then
-                -- 能量吸取怪 (精英词缀)
+            if onLine then
+                -- 能量吸取词缀
                 if m.lineHealPerSec and m.lineHealPerSec > 0 then
-                    local heal = m.lineHealPerSec * dt
-                    m.hp = math.min(m.hp + heal, m.maxHp)
+                    m.hp = math.min(m.hp + m.lineHealPerSec * tickInterval, m.maxHp)
                 end
 
                 -- 线伤减免
+                local finalDmg = dmgPerTick
                 if m.lineDmgReduction and m.lineDmgReduction > 0 then
-                    totalDps = totalDps * (1.0 - m.lineDmgReduction)
+                    finalDmg = finalDmg * (1.0 - m.lineDmgReduction)
                 end
+                finalDmg = math.max(1, math.floor(finalDmg + 0.5))
 
-                -- 累积伤害，每 0.5 秒结算一次
+                -- 在 DamageMonster 之前缓存 ID（伤害可能导致怪物立即死亡，node 变 nil）
                 local id = tostring(m.node:GetID())
-                local acc = lineDmgAccum_[id]
-                if not acc then
-                    acc = { dmg = 0, cd = 0 }
-                    lineDmgAccum_[id] = acc
-                end
 
-                acc.dmg = acc.dmg + totalDps * dt
-                acc.cd  = acc.cd  - dt
+                -- 立即扣血（不弹数字）
+                Monster.DamageMonster(m, finalDmg, true, true)
 
-                if acc.cd <= 0 and acc.dmg >= 1.0 then
-                    local dmg = math.floor(acc.dmg)
-                    acc.dmg = acc.dmg - dmg
-                    acc.cd  = LINE_DMG_INTERVAL
-                    -- 用青蓝色显示能源线伤害，跳过 DamageMonster 内部的黄色文字
-                    Utils.SpawnDmgText(m.node.position, dmg, LINE_DMG_COLOR, LINE_DMG_STROKE)
-                    Monster.DamageMonster(m, dmg, true, true)
+                -- 累积到显示缓冲
+                local disp = lineDmgDisplay_[id]
+                if not disp then
+                    disp = { accum = 0, cd = showInterval }
+                    lineDmgDisplay_[id] = disp
                 end
+                disp.accum = disp.accum + finalDmg
             end
 
             ::continue_monster::
         end
     end
 
-    -- 清理已死亡怪物的累积器
-    for id in pairs(lineDmgAccum_) do
+    -- 推进每只怪的显示冷却，到期弹出累积数字
+    for id, disp in pairs(lineDmgDisplay_) do
+        disp.cd = disp.cd - dt
+        if disp.cd <= 0 then
+            if disp.accum >= 1 then
+                local pos = nil
+                for _, m in ipairs(GS.monsters) do
+                    if m.node and tostring(m.node:GetID()) == id then
+                        pos = m.node.position
+                        break
+                    end
+                end
+                if pos then
+                    Utils.SpawnDmgText(pos, math.floor(disp.accum), LINE_DMG_COLOR, LINE_DMG_STROKE)
+                end
+            end
+            disp.accum = 0
+            disp.cd    = showInterval
+        end
+    end
+
+    -- 清理已死亡/消失怪物的显示缓冲
+    for id in pairs(lineDmgDisplay_) do
         local found = false
         for _, m in ipairs(GS.monsters) do
             if m.node and tostring(m.node:GetID()) == id and m.hp > 0 then
@@ -1533,9 +1784,7 @@ function M.UpdateLineDamage(dt)
                 break
             end
         end
-        if not found then
-            lineDmgAccum_[id] = nil
-        end
+        if not found then lineDmgDisplay_[id] = nil end
     end
 end
 
@@ -1593,22 +1842,22 @@ end
 
 function M.UpdateEnergyLinePulse(dt)
     -- 线材质呼吸效果
-    if GS.lineMat then
-        GS.linePulseTime = GS.linePulseTime + dt
+    GS.linePulseTime = GS.linePulseTime + dt
 
-        if GS.shortCircuit.active then
-            -- 短路时红色闪烁
-            local flash = 0.5 + 0.5 * math.sin(GS.linePulseTime * 8.0)
-            if shortCircuitMat_ then
-                shortCircuitMat_:SetShaderParameter("MatEmissiveColor",
-                    Variant(Color(1.5 + flash * 1.5, 0.2 + flash * 0.3, 0.1 + flash * 0.1)))
-            end
-        else
-            -- 正常蓝色呼吸
-            local pulse = 0.5 + 0.5 * math.sin(GS.linePulseTime * 3.0)
-            local intensity = 0.6 + pulse * 1.0
-            GS.lineMat:SetShaderParameter("MatEmissiveColor",
-                Variant(Color(0.5 * intensity, 1.0 * intensity, 1.5 * intensity)))
+    if GS.shortCircuit.active then
+        -- 短路时红色闪烁（单一材质）
+        local flash = 0.5 + 0.5 * math.sin(GS.linePulseTime * 8.0)
+        if shortCircuitMat_ then
+            shortCircuitMat_:SetShaderParameter("MatEmissiveColor",
+                Variant(Color(1.5 + flash * 1.5, 0.2 + flash * 0.3, 0.1 + flash * 0.1)))
+        end
+    elseif GS.edgeMats then
+        -- 每条边独立呼吸（保持各自渐变色，只调整亮度）
+        local pulse = 0.5 + 0.5 * math.sin(GS.linePulseTime * 3.0)
+        local intensity = 0.7 + pulse * 0.8
+        for _, em in pairs(GS.edgeMats) do
+            em.mat:SetShaderParameter("MatEmissiveColor",
+                Variant(Color(em.eR * intensity, em.eG * intensity, em.eB * intensity)))
         end
     end
 
@@ -1642,6 +1891,60 @@ function M.CalcAttenuation(dist)
     local R = M.GetEnergyRange()
     local att = 1.0 - 0.65 * math.pow(dist / R, 1.35)
     return math.max(0.25, math.min(1.0, att))
+end
+
+-- ============================================================================
+-- 导线放置弹跳动画
+-- ============================================================================
+
+local function WireBounceSpring(t)
+    -- 阻尼弹簧: 从高处落到目标位置
+    local decay = math.exp(-7.0 * t)
+    local osc = math.cos(5.0 * math.pi * t)
+    return 1.0 - decay * osc
+end
+
+function M.UpdateWireAnimations(dt)
+    if #wireAnims_ == 0 then return end
+
+    local finished = {}
+    for i, anim in ipairs(wireAnims_) do
+        if anim.delay > 0 then
+            anim.delay = anim.delay - dt
+        else
+            anim.t = anim.t + dt
+            local progress = math.min(anim.t / WIRE_ANIM_DUR, 1.0)
+            local spring = WireBounceSpring(progress)
+
+            if anim.node then
+                -- Y 位置从 startY 弹跳到 targetY
+                local y = anim.startY + (anim.targetY - anim.startY) * spring
+                local pos = anim.node.position
+                anim.node.position = Vector3(pos.x, y, pos.z)
+
+                -- 缩放从压缩恢复到正常
+                local sx = anim.scaleX * (0.7 + 0.3 * spring)
+                local sy = LINE_THICK * (0.4 + 0.6 * spring)
+                local sz = anim.scaleZ * (0.7 + 0.3 * spring)
+                anim.node.scale = Vector3(sx, sy, sz)
+            end
+
+            if progress >= 1.0 then
+                -- 动画完成，确保精确到达目标
+                if anim.node then
+                    local pos = anim.node.position
+                    anim.node.position = Vector3(pos.x, anim.targetY, pos.z)
+                    anim.node.scale = Vector3(anim.scaleX, LINE_THICK, anim.scaleZ)
+                end
+                table.insert(finished, i)
+            end
+        end
+    end
+
+    -- 从后往前删除已完成的动画
+    for j = #finished, 1, -1 do
+        table.remove(wireAnims_, finished[j])
+    end
 end
 
 return M

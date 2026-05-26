@@ -13,6 +13,29 @@ local StatusEffect = require("StatusEffect")
 local M = {}
 
 -- ============================================================================
+-- 放置动画状态
+-- ============================================================================
+local placeAnims_ = {}  -- tower ref → { t = elapsed time }
+local PLACE_ANIM_DUR = 0.45  -- 动画总时长(秒)
+
+-- ============================================================================
+-- 发光底边环材质 (缓存)
+-- ============================================================================
+local glowRingMat_ = nil
+
+local function GetGlowRingMat()
+    if not glowRingMat_ then
+        glowRingMat_ = Material:new()
+        glowRingMat_:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+        glowRingMat_:SetShaderParameter("MatDiffColor", Variant(Color(0.3, 0.85, 1.0, 0.7)))
+        glowRingMat_:SetShaderParameter("MatEmissiveColor", Variant(Color(1.2, 2.5, 3.5)))
+        glowRingMat_:SetShaderParameter("Metallic", Variant(0.6))
+        glowRingMat_:SetShaderParameter("Roughness", Variant(0.2))
+    end
+    return glowRingMat_
+end
+
+-- ============================================================================
 -- 武器模型列表
 -- ============================================================================
 local WEAPON_MODELS = {
@@ -21,6 +44,23 @@ local WEAPON_MODELS = {
     "weapon-catapult",
     "weapon-turret",
 }
+
+-- ============================================================================
+-- 伤害计算（统一入口，UI 和攻击逻辑都调这里）
+-- ============================================================================
+
+--- 计算塔当前每发伤害（实时反映 delivered 能量）
+--- @param tower table 塔对象
+--- @return number 当次发射伤害
+function M.CalcTowerDamage(tower)
+    -- 基础伤 = 获得能量 × 基础倍率
+    local dmg = (tower.delivered or 0) * CONFIG.TowerDmgRate
+    -- 乘法项：圣器倍率
+    dmg = dmg * (tower.artDmgMult or 1.0)
+    -- 加法项：圣器固伤（占位，待配件系统实现）
+    dmg = dmg + (tower.artFlatDmg or 0)
+    return math.max(0, dmg)
+end
 
 -- ============================================================================
 -- 经济
@@ -57,6 +97,16 @@ local function CreateTowerModel(node)
     weaponModel:SetModel(cache:GetResource("Model", "Meshes/TD/" .. weaponName .. ".mdl"))
     weaponModel:SetMaterial(cache:GetResource("Material", "Materials/TD/" .. weaponName .. "_00_colormap.xml"))
     weaponModel.castShadows = true
+
+    -- 发光底边环 (通电后显示)
+    local glowRing = node:CreateChild("TowerGlowRing")
+    glowRing.position = Vector3(0, 0.10, 0)
+    glowRing.scale = Vector3(0.85, 0.30, 0.85)
+    local glowModel = glowRing:CreateComponent("StaticModel")
+    glowModel:SetModel(cache:GetResource("Model", "Models/Torus.mdl"))
+    glowModel:SetMaterial(GetGlowRingMat())
+    glowModel.castShadows = false
+    glowRing.enabled = false  -- 默认隐藏，通电后开启
 end
 
 -- ============================================================================
@@ -67,12 +117,27 @@ function M.PlaceBasicTower(gx, gz)
     local cost = M.GetTowerCost()
     if GS.gold < cost then return end
     GS.gold = GS.gold - cost
+    Utils.SpawnCoinText(Vector3(gx, 0, gz), -cost)
 
     local node = GS.scene:CreateChild("Tower_" .. gx .. "_" .. gz)
     node.position = Vector3(gx, 0, gz)
     CreateTowerModel(node)
 
     local dist = math.sqrt(gx * gx + gz * gz)
+    -- ⚡ 能量标签
+    local labelNode = node:CreateChild("TowerEnergyLabel")
+    labelNode.position = Vector3(0, 2.0, 0)
+    local energyLabel = labelNode:CreateComponent("Text3D")
+    energyLabel:SetFont("Fonts/MiSans-Regular.ttf", 18)
+    energyLabel:SetText("⚡0")
+    energyLabel:SetColor(Color(0.55, 0.88, 1.0, 0.85))
+    energyLabel:SetAlignment(HA_CENTER, VA_CENTER)
+    energyLabel:SetFaceCameraMode(FC_ROTATE_XYZ)
+    energyLabel:SetTextEffect(TE_STROKE)
+    energyLabel:SetEffectStrokeThickness(2)
+    energyLabel:SetEffectColor(Color(0.0, 0.05, 0.2, 0.85))
+    energyLabel.fixedScreenSize = true
+
     local tower = {
         node = node,
         gx = gx,
@@ -85,6 +150,7 @@ function M.PlaceBasicTower(gx, gz)
         weaponYaw = 0,
         targetYaw = nil,
         activated = false,  -- 需要通过能源线连接才激活
+        energyLabel = energyLabel,
     }
     -- 初始化圣器槽位
     Artifact.InitTowerSlots(tower)
@@ -97,8 +163,55 @@ function M.PlaceBasicTower(gx, gz)
     -- 设置未激活视觉
     M.UpdateTowerActivationVisual(tower)
 
+    -- 启动 Q弹放置动画
+    placeAnims_[tower] = { t = 0 }
+    node.scale = Vector3(0.6, 0.3, 0.6)  -- 初始扁平状态
+
     print(string.format("Tower built at (%d, %d), dist=%.1f, cost=%d, gold=%d",
         gx, gz, dist, cost, GS.gold))
+end
+
+-- ============================================================================
+-- Q弹放置动画更新 (弹簧阻尼曲线)
+-- ============================================================================
+
+--- 弹簧阻尼曲线: 快速弹起 → 过冲 → 回弹收敛
+--- @param t number 归一化时间 [0, 1]
+--- @return number scaleX, number scaleY
+local function BounceSpring(t)
+    -- 阻尼弹簧: y = 1 - e^(-6t) * cos(4πt)
+    local decay = math.exp(-6.0 * t)
+    local osc = math.cos(4.0 * math.pi * t)
+    local factor = 1.0 - decay * osc
+
+    -- X/Z 和 Y 轴反相: 挤扁时宽、弹高时窄 (果冻感)
+    local sy = 0.3 + 0.7 * factor          -- Y: 从 0.3 弹到 ~1.0
+    local sx = 1.0 + 0.15 * decay * osc    -- X/Z: 反向微幅波动
+    return sx, sy
+end
+
+function M.UpdatePlaceAnimations(dt)
+    local finished = {}
+    for tower, anim in pairs(placeAnims_) do
+        anim.t = anim.t + dt
+        local progress = math.min(anim.t / PLACE_ANIM_DUR, 1.0)
+        local sx, sy = BounceSpring(progress)
+
+        if tower.node then
+            tower.node.scale = Vector3(sx, sy, sx)
+        end
+
+        if progress >= 1.0 then
+            -- 确保最终 scale 精确为 (1,1,1)
+            if tower.node then
+                tower.node.scale = Vector3(1, 1, 1)
+            end
+            table.insert(finished, tower)
+        end
+    end
+    for _, tower in ipairs(finished) do
+        placeAnims_[tower] = nil
+    end
 end
 
 -- ============================================================================
@@ -115,6 +228,12 @@ function M.UpdateTowerActivationVisual(tower)
 
     local model = weaponNode:GetComponent("StaticModel")
     if not model then return end
+
+    -- 发光底边环: 通电时显示
+    local glowRing = tower.node:GetChild("TowerGlowRing", false)
+    if glowRing then
+        glowRing.enabled = tower.activated
+    end
 
     if tower.activated then
         -- 恢复正常材质
@@ -145,6 +264,8 @@ function M.UpdateTowerAttacks(dt)
     for _, tower in ipairs(GS.towers) do
         -- 未激活的塔不攻击
         if not tower.activated then goto continue_tower end
+        -- stops_tower_attack 圣器: 此塔完全不攻击
+        if tower.artStopsAttack then goto continue_tower end
 
         -- 平滑旋转
         if tower.targetYaw then
@@ -187,10 +308,7 @@ function M.UpdateTowerAttacks(dt)
         -- 开火 (攻速随功率比线性缩放, 最低 30%)
         tower.cooldown = tower.cooldown - dt
         if tower.cooldown <= 0 and bestM then
-            local att = EnergyTower.CalcAttenuation(tower.dist)
-            local dmg = CONFIG.TowerBaseDmg * att
-            -- 圣器伤害乘数
-            dmg = dmg * (tower.artDmgMult or 1.0)
+            local dmg = M.CalcTowerDamage(tower)
             -- 圣器弹道形态: area → AOE 爆炸弹
             if tower.artBulletForm == "area" and tower.artAreaRadius > 0 then
                 M.FireAreaProjectile(tower, bestM, dmg, tower.artAreaRadius)
@@ -336,16 +454,16 @@ function M.DemolishTower(towerIndex)
     local originalCost = M.GetTowerOriginalCost(towerIndex)
     local refund = math.floor(originalCost * ratio + 0.5)
     GS.gold = GS.gold + refund
+    Utils.SpawnCoinText(Vector3(tower.gx, 0, tower.gz), refund)
 
     -- 删除该塔所在格子的所有能源线边 (图模型)
     EnergyTower.RemoveEdgesAtCell(tower.gx, tower.gz)
 
-    -- 卸下该塔上的圣器 (归还背包)
-    if tower.mainSlot then
-        Artifact.UnequipFromTower(tower.mainSlot)
-    end
-    if tower.subSlot then
-        Artifact.UnequipFromTower(tower.subSlot)
+    -- 卸下该塔上的所有圣器 (归还背包)
+    for i = 1, 3 do
+        if tower.slots and tower.slots[i] then
+            Artifact.UnequipFromTower(tower.slots[i])
+        end
     end
 
     -- 移除节点

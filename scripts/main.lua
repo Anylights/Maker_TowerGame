@@ -13,6 +13,7 @@ local Wave         = require("Wave")
 local Utils        = require("Utils")
 local GameUI       = require("GameUI")
 local Artifact     = require("Artifact")
+local ArtifactVFX  = require("ArtifactVFX")
 local StatusEffect = require("StatusEffect")
 
 -- ============================================================================
@@ -101,8 +102,9 @@ function HandleUpdate(eventType, eventData)
     EnergyTower.UpdateEnergyTowerHP()
     EnergyTower.UpdateEnergyTowerAnim(rawDt)
 
-    -- 能源线脉冲动画
+    -- 能源线脉冲动画 & 导线放置弹跳动画
     EnergyTower.UpdateEnergyLinePulse(dt)
+    EnergyTower.UpdateWireAnimations(dt)
 
     -- 浮动伤害数字
     Utils.UpdateDmgTexts(dt)
@@ -152,6 +154,9 @@ function HandleUpdate(eventType, eventData)
     -- 短路持续扣血
     EnergyTower.UpdateShortCircuitDamage(dt)
 
+    -- 塔放置动画
+    Tower.UpdatePlaceAnimations(dt)
+
     -- 塔攻击 & 炮弹
     Tower.UpdateTowerAttacks(dt)
     Tower.UpdateProjectiles(dt)
@@ -159,11 +164,17 @@ function HandleUpdate(eventType, eventData)
     -- 磁币圣器自动吸取
     Artifact.UpdateAutoPickup(dt)
 
+    -- 圣器 VFX 每帧更新（凝聚塔能量、动态效果等）
+    ArtifactVFX.Update(dt)
+
     -- 掉落物
     Utils.UpdateLoots(dt)
 
     -- HUD 刷新
     GameUI.RefreshUI()
+
+    -- 全屏公告计时
+    GameUI.UpdateAnnouncement(dt)
 end
 
 -- ============================================================================

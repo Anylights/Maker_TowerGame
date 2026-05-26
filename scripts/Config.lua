@@ -49,17 +49,17 @@ M.MOEBIUS = {
 -- 能源塔升级属性表 (Lv.1 ~ Lv.10)
 -- ============================================================================
 M.ET_LEVELS = {
-    --  power, hp,  radius, energyCap, convEff
-    { power = 100, hp = 100, radius = 7, energyCap = 100, convEff = 1.00 },  -- Lv.1
-    { power = 110, hp = 115, radius = 7, energyCap = 110, convEff = 1.05 },  -- Lv.2
-    { power = 120, hp = 130, radius = 7, energyCap = 120, convEff = 1.10 },  -- Lv.3
-    { power = 130, hp = 145, radius = 8, energyCap = 130, convEff = 1.15 },  -- Lv.4 半径+1
-    { power = 145, hp = 165, radius = 8, energyCap = 145, convEff = 1.20 },  -- Lv.5 核心圣器槽
-    { power = 160, hp = 185, radius = 8, energyCap = 160, convEff = 1.25 },  -- Lv.6
-    { power = 175, hp = 205, radius = 9, energyCap = 175, convEff = 1.30 },  -- Lv.7 半径+1
-    { power = 185, hp = 220, radius = 9, energyCap = 185, convEff = 1.35 },  -- Lv.8
-    { power = 195, hp = 235, radius = 9, energyCap = 195, convEff = 1.40 },  -- Lv.9
-    { power = 200, hp = 250, radius = 9, energyCap = 200, convEff = 1.45 },  -- Lv.10 核心圣器觉醒
+    --  power, hp,  radius, energyCap, convEff, lineDmgMult
+    { power = 100, hp = 100, radius = 7, energyCap = 100, convEff = 1.00, lineDmgMult = 1.00 },  -- Lv.1
+    { power = 110, hp = 115, radius = 7, energyCap = 110, convEff = 1.05, lineDmgMult = 1.15 },  -- Lv.2
+    { power = 120, hp = 130, radius = 7, energyCap = 120, convEff = 1.10, lineDmgMult = 1.30 },  -- Lv.3
+    { power = 130, hp = 145, radius = 8, energyCap = 130, convEff = 1.15, lineDmgMult = 1.50 },  -- Lv.4 半径+1
+    { power = 145, hp = 165, radius = 8, energyCap = 145, convEff = 1.20, lineDmgMult = 1.75 },  -- Lv.5 核心圣器槽
+    { power = 160, hp = 185, radius = 8, energyCap = 160, convEff = 1.25, lineDmgMult = 2.00 },  -- Lv.6
+    { power = 175, hp = 205, radius = 9, energyCap = 175, convEff = 1.30, lineDmgMult = 2.30 },  -- Lv.7 半径+1
+    { power = 185, hp = 220, radius = 9, energyCap = 185, convEff = 1.35, lineDmgMult = 2.60 },  -- Lv.8
+    { power = 195, hp = 235, radius = 9, energyCap = 195, convEff = 1.40, lineDmgMult = 3.00 },  -- Lv.9
+    { power = 200, hp = 250, radius = 9, energyCap = 200, convEff = 1.45, lineDmgMult = 3.50 },  -- Lv.10 核心圣器觉醒
 }
 
 -- 升级消耗 (index = 升级目标等级, 即 [2] = Lv.1→Lv.2 的消耗)
@@ -144,7 +144,7 @@ M.CONFIG = {
     SpawnDistanceFactor = 2.0,     -- 刷新距离 = EnergyRange * 2 * 此值
     SectorAngleDeg = 30,           -- 每个刷新扇区角度(度)
     SectorAngleRad = math.rad(30), -- 预计算弧度
-    MaxSpawnPoints = { 3, 4, 4, 5, 5, 6 }, -- 大波次1/2/3/4/5/6+ 最大同时刷新点
+    MaxSpawnPoints = { 2, 3, 3, 4, 4, 5, 5, 6 }, -- 大波次1/2/3/4/5/6/7/8+ 最大同时刷新点
 
     -- === 转向避障 ===
     SteerLookAhead = 1.5,          -- 前视距离(米)
@@ -154,10 +154,13 @@ M.CONFIG = {
     -- === 刷新指示器 ===
     IndicatorArcWidth = 2.5,       -- 扇环径向宽度(米), 从范围圈向外延伸
     BossWarnTriSize = 0.8,         -- Boss 警告三角形尺寸(米)
+    -- 能量线衰减 (固定值 = Lv1总功率100 × 2%，升级能源塔不变)
+    PowerDrainPerSegment = 2,
     -- 塔攻击
     TowerRange = 5.0,
     TowerFireInterval = 1.0,
-    TowerBaseDmg = 20,
+    TowerBaseDmg = 20,       -- 保留旧值，兼容旧代码
+    TowerDmgRate = 0.25,     -- 新公式: dmg = delivered × TowerDmgRate × 圣器乘数
     -- 炮弹
     ProjectileSpeed = 12.0,
     ProjectileSize = 0.15,
@@ -289,6 +292,10 @@ M.GS = {
     artifactInventory = {},       -- 背包: { {id, def, equipped, towerIndex, slotType}, ... }
     artifactDropPending = false,  -- 是否有待处理的掉落选择
     artifactDropCandidates = nil, -- 3选1 候选列表
+
+    -- 能源线伤害倍率 (局外升级 / 主动技能)
+    lineDmgBaseMult = 1.0,        -- 局外升级: 线伤基础倍率
+    lineDmgSkillMult = 1.0,       -- 主动技能: 运行时临时增益倍率
 }
 
 -- ============================================================================
@@ -377,6 +384,9 @@ function M.ResetGS()
     M.GS.artifactInventory = {}
     M.GS.artifactDropPending = false
     M.GS.artifactDropCandidates = nil
+
+    M.GS.lineDmgBaseMult = 1.0
+    M.GS.lineDmgSkillMult = 1.0
 end
 
 return M

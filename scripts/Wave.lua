@@ -9,6 +9,7 @@ local GS = Cfg.GS
 local Monster = require("Monster")
 local Artifact = require("Artifact")
 local EnergyTower = require("EnergyTower")
+local GameUI = require("GameUI")
 
 local M = {}
 
@@ -82,6 +83,12 @@ local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
     local pool = GetPool(bigWave)
     local affixPool = GetAffixPool(bigWave)
     local maxPts = GetMaxSpawnPoints(bigWave)
+
+    -- 特殊规则: 第1大波次的1.2之前(即1.1)只允许1个刷新点
+    if bigWave == 1 and smallWave < 2 then
+        maxPts = 1
+    end
+
     local isBossWave = (smallWave == CONFIG.MiniBossSubWave or smallWave == CONFIG.BigBossSubWave)
 
     -- Boss 波只有 1 个扇区用于 Boss
@@ -207,46 +214,52 @@ end
 -- 刷新指示器 (CustomGeometry 扇环 / Boss 三角警告)
 -- ============================================================================
 
---- 创建一个扇环指示器 (地面贴合, 内圈紧贴范围圈, 从内到外红色→透明渐变)
+--- 创建一个扇环指示器 (多层渐变: 内圈紧贴范围圈, 从 FF0000 到透明)
+--- 每层独立子节点 + 独立 PBR Alpha 材质, 实现真正的 alpha 渐变
 --- @param angle number 中心角度 (弧度)
 --- @param isBoss boolean 是否为 Boss 警告
---- @return Node 指示器节点
+--- @return Node 指示器父节点 (包含多个子层)
 local function CreateSectorIndicator(angle, isBoss)
     local range = EnergyTower.GetEnergyRange()
-    local innerR = range                                 -- 内圈紧贴范围圈
-    local outerR = range + CONFIG.IndicatorArcWidth      -- 外圈向外扩展
+    local innerR = range + 0.5                           -- 与范围圈对齐 (Scene 中 +0.5)
+    local outerR = innerR + CONFIG.IndicatorArcWidth     -- 外圈向外延伸
     local halfAngle = CONFIG.SectorAngleRad * 0.5
     local arcSegments = 16    -- 圆弧细分
-    local radialLayers = 5    -- 径向分层 (实现渐变)
+    local radialLayers = 16   -- 径向分层 (越多过渡越平滑)
     local y = CONFIG.GridY + 0.01
 
     -- 颜色参数
-    local baseColor
+    local baseR, baseG, baseB
     if isBoss then
-        baseColor = { r = 1.0, g = 0.7, b = 0.0 }  -- Boss: 橙黄
+        baseR, baseG, baseB = 1.0, 0.55, 0.0   -- Boss: 橙色
     else
-        baseColor = { r = 1.0, g = 0.0, b = 0.0 }  -- 普通: 纯红 #FF0000
+        baseR, baseG, baseB = 1.0, 0.0, 0.0     -- 普通: 纯红 #FF0000
     end
-    local innerAlpha = 0.72   -- 内圈不透明度
+    local innerAlpha = 0.65   -- 内圈不透明度
     local outerAlpha = 0.0    -- 外圈完全透明
 
-    local node = GS.scene:CreateChild("SectorIndicator")
-    node.position = Vector3(0, y, 0)
+    local parentNode = GS.scene:CreateChild("SectorIndicator")
+    parentNode.position = Vector3(0, y, 0)
 
-    local geom = node:CreateComponent("CustomGeometry")
-    geom:BeginGeometry(0, TRIANGLE_LIST)
+    -- 预加载 Technique
+    local tech = cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml")
 
-    -- 构建多层扇环: radialLayers 层 × arcSegments 段
+    -- 收集本指示器的层数据 (材质引用 + 基础 alpha + 颜色)
+    local layersData = {}
+
     for layer = 0, radialLayers - 1 do
         local t0 = layer / radialLayers
         local t1 = (layer + 1) / radialLayers
         local r0 = innerR + (outerR - innerR) * t0
         local r1 = innerR + (outerR - innerR) * t1
-        -- alpha 按层线性插值
-        local alpha0 = innerAlpha + (outerAlpha - innerAlpha) * t0
-        local alpha1 = innerAlpha + (outerAlpha - innerAlpha) * t1
-        local c0 = Color(baseColor.r, baseColor.g, baseColor.b, alpha0)
-        local c1 = Color(baseColor.r, baseColor.g, baseColor.b, alpha1)
+        -- 该层的 alpha = 内外两端 alpha 的中值
+        local tMid = (t0 + t1) * 0.5
+        local layerAlpha = innerAlpha + (outerAlpha - innerAlpha) * tMid
+
+        -- 每层独立子节点
+        local layerNode = parentNode:CreateChild("Layer" .. layer)
+        local geom = layerNode:CreateComponent("CustomGeometry")
+        geom:BeginGeometry(0, TRIANGLE_LIST)
 
         for s = 0, arcSegments - 1 do
             local a0 = angle - halfAngle + (s / arcSegments) * halfAngle * 2
@@ -254,32 +267,43 @@ local function CreateSectorIndicator(angle, isBoss)
             local cos0, sin0 = math.cos(a0), math.sin(a0)
             local cos1, sin1 = math.cos(a1), math.sin(a1)
 
-            -- 4 个顶点: 内左, 内右, 外右, 外左
             local il = Vector3(cos0 * r0, 0, sin0 * r0)
             local ir = Vector3(cos1 * r0, 0, sin1 * r0)
             local or_ = Vector3(cos1 * r1, 0, sin1 * r1)
             local ol = Vector3(cos0 * r1, 0, sin0 * r1)
 
-            -- 三角形1: il, ir, or_
-            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP); geom:DefineColor(c0)
-            geom:DefineVertex(ir); geom:DefineNormal(Vector3.UP); geom:DefineColor(c0)
-            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP); geom:DefineColor(c1)
+            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
+            geom:DefineVertex(ir); geom:DefineNormal(Vector3.UP)
+            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
 
-            -- 三角形2: il, or_, ol
-            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP); geom:DefineColor(c0)
-            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP); geom:DefineColor(c1)
-            geom:DefineVertex(ol); geom:DefineNormal(Vector3.UP); geom:DefineColor(c1)
+            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
+            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
+            geom:DefineVertex(ol); geom:DefineNormal(Vector3.UP)
         end
+
+        geom:Commit()
+
+        -- 独立材质 (PBR Alpha, 支持半透明)
+        local mat = Material:new()
+        mat:SetTechnique(0, tech)
+        mat:SetShaderParameter("MatDiffColor",
+            Variant(Color(baseR, baseG, baseB, layerAlpha)))
+        mat:SetShaderParameter("MatEmissiveColor",
+            Variant(Color(baseR * 0.4, baseG * 0.4, baseB * 0.4)))
+        mat:SetShaderParameter("Metallic", Variant(0.0))
+        mat:SetShaderParameter("Roughness", Variant(1.0))
+        geom:SetMaterial(mat)
+
+        -- 缓存材质引用和基础参数 (动画用)
+        table.insert(layersData, {
+            mat = mat,
+            baseAlpha = layerAlpha,
+            r = baseR, g = baseG, b = baseB,
+        })
     end
 
-    geom:Commit()
-
-    -- 材质: 无光照 + 顶点颜色 (颜色来自 DefineColor)
-    local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlitVCol.xml"))
-    geom:SetMaterial(mat)
-
-    return node
+    table.insert(indicatorLayers_, layersData)
+    return parentNode
 end
 
 --- 创建 Boss 三角警告标记
@@ -334,6 +358,7 @@ local function ClearIndicators()
         if n then n:Remove() end
     end
     GS.indicatorNodes = {}
+    indicatorLayers_ = {}
     for _, n in ipairs(GS.bossWarnNodes) do
         if n then n:Remove() end
     end
@@ -348,42 +373,40 @@ end
 
 local indicatorTime_ = 0  -- 累计动画时间
 
+--- 每个指示器的层数据 (创建时填充, 动画时直接使用)
+--- indicatorLayers_[i] = { {mat=Material, baseAlpha=number, r=number, g=number, b=number}, ... }
+local indicatorLayers_ = {}
+
 --- 更新指示器动画 (每帧调用)
 --- preparing 阶段: 快速闪烁; 其他阶段: 缓慢呼吸脉冲
 local function UpdateIndicatorAnimation(dt)
     indicatorTime_ = indicatorTime_ + dt
 
     local isPreparing = (GS.wavePhase == "preparing")
-    local alpha
+    -- alpha 乘数 (乘以每层基础 alpha)
+    local mul
     if isPreparing then
-        -- 快速闪烁: 4Hz sin 波, 在 0.4 ~ 1.0 之间振荡
-        alpha = 0.7 + 0.3 * math.sin(indicatorTime_ * 8.0 * math.pi)
+        -- 快速闪烁: 4Hz, 乘数在 0.3 ~ 1.0
+        mul = 0.65 + 0.35 * math.sin(indicatorTime_ * 8.0 * math.pi)
     else
-        -- 缓慢呼吸: 0.5Hz sin 波, 在 0.6 ~ 1.0 之间振荡
-        alpha = 0.8 + 0.2 * math.sin(indicatorTime_ * 1.0 * math.pi)
+        -- 缓慢呼吸: 0.5Hz, 乘数在 0.7 ~ 1.0
+        mul = 0.85 + 0.15 * math.sin(indicatorTime_ * 1.0 * math.pi)
     end
 
-    -- 扇环指示器: MatDiffColor 乘以顶点颜色
-    for _, n in ipairs(GS.indicatorNodes) do
-        if n then
-            local geom = n:GetComponent("CustomGeometry")
-            if geom then
-                local mat = geom:GetMaterial()
-                if mat then
-                    mat:SetShaderParameter("MatDiffColor",
-                        Variant(Color(1, 1, 1, alpha)))
-                end
-            end
+    -- 扇环指示器: 使用创建时缓存的材质引用和基础 alpha
+    for _, layers in ipairs(indicatorLayers_) do
+        for _, info in ipairs(layers) do
+            info.mat:SetShaderParameter("MatDiffColor",
+                Variant(Color(info.r, info.g, info.b, info.baseAlpha * mul)))
         end
     end
 
-    -- Boss 三角警告: 同样调制
+    -- Boss 三角警告
     local bossAlpha
     if isPreparing then
-        -- Boss 警告闪得更剧烈
-        bossAlpha = 0.5 + 0.5 * math.sin(indicatorTime_ * 10.0 * math.pi)
+        bossAlpha = 0.4 + 0.6 * math.abs(math.sin(indicatorTime_ * 5.0 * math.pi))
     else
-        bossAlpha = 0.7 + 0.3 * math.sin(indicatorTime_ * 1.5 * math.pi)
+        bossAlpha = 0.6 + 0.4 * math.sin(indicatorTime_ * 1.5 * math.pi)
     end
     for _, n in ipairs(GS.bossWarnNodes) do
         if n then
@@ -539,6 +562,15 @@ function M.Update(dt)
             GS.wavePhase = "spawning"
             print(string.format("[Wave] Big%d-Small%d (Global %d) started!",
                 GS.bigWave, GS.smallWave, GS.globalWave))
+
+            -- 全屏公告: 敌袭来临
+            local waveLabel = string.format("%d.%d", GS.bigWave, GS.smallWave)
+            local waveName = M.GetWaveName()
+            GameUI.ShowAnnouncement(
+                "敌袭来临",
+                string.format("Wave %s「%s」", waveLabel, waveName),
+                nil  -- 默认红色
+            )
         end
         return
     end
@@ -598,6 +630,14 @@ function M.Update(dt)
     -- === 清场阶段 ===
     if GS.wavePhase == "clearing" then
         if #GS.monsters == 0 then
+            -- 全屏公告: 波次完成
+            local waveLabel = string.format("%d.%d", GS.bigWave, GS.smallWave)
+            GameUI.ShowAnnouncement(
+                "波次完成",
+                string.format("Wave %s 已清除", waveLabel),
+                { 80, 240, 120, 255 }  -- 绿色
+            )
+
             -- 波次完成奖励
             local bonusGold = 20 + GS.globalWave * 10
             local bonusMat = GS.globalWave * 3
@@ -685,20 +725,20 @@ function M.GetWaveInfo()
     local sw = GS.smallWave
     local gw = GS.globalWave
 
-    local waveLabel = string.format("大%d·%d/%d (第%d波)", bw, sw, CONFIG.BigWaveSize, gw)
+    local waveLabel = string.format("%d.%d", bw, sw)
 
     if phase == "preparing" then
         local waveName = M.GetWaveName()
-        return string.format("%s「%s」| %.0f秒 (空格跳过)",
+        return string.format("Wave %s「%s」| %.0f秒 (空格跳过)",
             waveLabel, waveName, math.max(0, GS.waveTimer))
     elseif phase == "spawning" then
-        return string.format("%s | 出怪中 %d/%d",
+        return string.format("Wave %s | 出怪中 %d/%d",
             waveLabel, spawnedMonstersInWave_, totalMonstersInWave_)
     elseif phase == "clearing" then
-        return string.format("%s | 清剿中 (剩余 %d)",
+        return string.format("Wave %s | 清剿中 (剩余 %d)",
             waveLabel, #GS.monsters)
     else
-        return waveLabel
+        return string.format("Wave %s", waveLabel)
     end
 end
 

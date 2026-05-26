@@ -44,11 +44,8 @@ end
 function M.GetHPBgMaterial()
     if hpBgMat_ then return hpBgMat_ end
     hpBgMat_ = Material:new()
-    hpBgMat_:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-    hpBgMat_:SetShaderParameter("MatDiffColor", Variant(Color(0.1, 0.1, 0.1, 0.7)))
-    hpBgMat_:SetShaderParameter("MatEmissiveColor", Variant(Color(0, 0, 0)))
-    hpBgMat_:SetShaderParameter("Metallic", Variant(0.0))
-    hpBgMat_:SetShaderParameter("Roughness", Variant(0.9))
+    hpBgMat_:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlit.xml"))
+    hpBgMat_:SetShaderParameter("MatDiffColor", Variant(Color(0.08, 0.08, 0.08, 1.0)))
     return hpBgMat_
 end
 
@@ -104,10 +101,10 @@ function M.CreateHealthBar(parentNode)
 
     local fillMat = Material:new()
     fillMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    fillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.1, 0.9, 0.1, 1.0)))
-    fillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.05, 0.4, 0.05)))
+    fillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.882, 0.224, 0.224, 1.0)))
+    fillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 0.0, 0.0)))
     fillMat:SetShaderParameter("Metallic", Variant(0.0))
-    fillMat:SetShaderParameter("Roughness", Variant(0.5))
+    fillMat:SetShaderParameter("Roughness", Variant(1.0))
     fillModel:SetMaterial(fillMat)
 
     return barRoot, fill, fillMat
@@ -125,18 +122,10 @@ function M.UpdateHealthBar(m)
     local fillW = fullW * ratio
     m.hpFill.scale = Vector3(fillW, CONFIG.HPBarH * 0.7, 0.015)
     local offset = (fullW - fillW) * 0.5
-    m.hpFill.position = Vector3(-offset, 0, 0.005)
+    m.hpFill.position = Vector3(-offset, 0, -0.005)
 
-    local r, g
-    if ratio > 0.5 then
-        r = (1.0 - ratio) * 2.0
-        g = 0.9
-    else
-        r = 0.9
-        g = ratio * 2.0
-    end
-    m.fillMat:SetShaderParameter("MatDiffColor", Variant(Color(r, g, 0.1, 1.0)))
-    m.fillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(r * 0.3, g * 0.3, 0.02)))
+    m.fillMat:SetShaderParameter("MatDiffColor", Variant(Color(0.882, 0.224, 0.224, 1.0)))
+    m.fillMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 0.0, 0.0)))
 end
 
 -- ============================================================================
@@ -155,7 +144,7 @@ function M.SpawnDmgText(pos, dmg, color, strokeColor)
     local text3d = node:CreateComponent("Text3D")
     text3d:SetFont("Fonts/MiSans-Regular.ttf", 28)
     text3d:SetText(string.format("-%.0f", dmg))
-    text3d:SetColor(color or Color(1.0, 0.95, 0.2, 1.0))
+    text3d:SetColor(color or Color(1.0, 0.18, 0.18, 1.0))
     text3d:SetAlignment(HA_CENTER, VA_CENTER)
     text3d:SetFaceCameraMode(FC_ROTATE_XYZ)
     text3d:SetTextEffect(TE_STROKE)
@@ -164,6 +153,33 @@ function M.SpawnDmgText(pos, dmg, color, strokeColor)
     text3d.fixedScreenSize = true
 
     local entry = { node = node, text3d = text3d, timer = 0, maxTime = 0.8 }
+    table.insert(GS.dmgTexts, entry)
+end
+
+-- 金币变化浮动提示: amount>0 绿色 +N, amount<0 红色 -N
+function M.SpawnCoinText(pos, amount)
+    if not GS.scene then return end
+    local node = GS.scene:CreateChild("CoinText")
+    node.position = Vector3(pos.x, pos.y + 1.2, pos.z)
+
+    local text3d = node:CreateComponent("Text3D")
+    text3d:SetFont("Fonts/MiSans-Regular.ttf", 24)
+    if amount >= 0 then
+        text3d:SetText(string.format("🪙+%d", amount))
+        text3d:SetColor(Color(0.35, 1.0, 0.45, 1.0))
+        text3d:SetEffectColor(Color(0.0, 0.15, 0.0, 0.9))
+    else
+        text3d:SetText(string.format("🪙%d", amount))
+        text3d:SetColor(Color(1.0, 0.85, 0.25, 1.0))
+        text3d:SetEffectColor(Color(0.2, 0.10, 0.0, 0.9))
+    end
+    text3d:SetAlignment(HA_CENTER, VA_CENTER)
+    text3d:SetFaceCameraMode(FC_ROTATE_XYZ)
+    text3d:SetTextEffect(TE_STROKE)
+    text3d:SetEffectStrokeThickness(2)
+    text3d.fixedScreenSize = true
+
+    local entry = { node = node, text3d = text3d, timer = 0, maxTime = 1.1 }
     table.insert(GS.dmgTexts, entry)
 end
 

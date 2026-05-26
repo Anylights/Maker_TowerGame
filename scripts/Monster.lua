@@ -12,12 +12,156 @@ local Wave -- lazy require to avoid circular dependency
 
 local M = {}
 
--- ============================================================================
--- UFO 模型列表
--- ============================================================================
-local UFO_MODELS = { "enemy-ufo-a", "enemy-ufo-b", "enemy-ufo-c", "enemy-ufo-d" }
-
 -- HP 缩放: 使用 Wave.HPScaleFactor() (抛物线缩放, 见 Wave.lua)
+
+-- ============================================================================
+-- 怪物复合模型构建 (用基础几何体按类型堆叠，赋予各类型独特外形)
+-- ============================================================================
+local function BuildMonsterVisuals(node, typeDef, monsterType, isElite)
+    local emitMult = isElite and 2.5 or 1.0
+    local baseEmitR = typeDef.emissive.r * emitMult
+    local baseEmitG = typeDef.emissive.g * emitMult
+    local baseEmitB = typeDef.emissive.b * emitMult
+
+    local bodyMat = Material:new()
+    bodyMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+    bodyMat:SetShaderParameter("MatDiffColor", Variant(typeDef.color))
+    bodyMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR, baseEmitG, baseEmitB)))
+    bodyMat:SetShaderParameter("Metallic", Variant(0.1))
+    bodyMat:SetShaderParameter("Roughness", Variant(0.8))
+
+    local c = typeDef.color
+
+    -- 辅助: 快速添加子部件
+    local function Part(name, mdl, mat, px, py, pz, sx, sy, sz, rq)
+        local pn = node:CreateChild(name)
+        pn.position = Vector3(px, py, pz)
+        pn.scale    = Vector3(sx, sy, sz)
+        if rq then pn.rotation = rq end
+        local m = pn:CreateComponent("StaticModel")
+        m:SetModel(cache:GetResource("Model", mdl))
+        m:SetMaterial(mat)
+        m.castShadows = true
+    end
+
+    -- 辅助: 创建发光眼睛材质
+    local function EyeMat(r, g, b, er, eg, eb)
+        local em = Material:new()
+        em:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+        em:SetShaderParameter("MatDiffColor",    Variant(Color(r,  g,  b,  1)))
+        em:SetShaderParameter("MatEmissiveColor", Variant(Color(er, eg, eb)))
+        em:SetShaderParameter("Metallic",  Variant(0.0))
+        em:SetShaderParameter("Roughness", Variant(0.4))
+        return em
+    end
+
+    if monsterType == "walker" then
+        -- 行尸: 圆滚躯干 + 小头 + 僵尸前伸双臂
+        Part("Body", "Models/Sphere.mdl",   bodyMat, 0, 0.55, 0,    0.88, 0.82, 0.88)
+        Part("Head", "Models/Sphere.mdl",   bodyMat, 0, 1.13, 0.08, 0.50, 0.50, 0.50)
+        Part("ArmL", "Models/Cylinder.mdl", bodyMat, -0.48, 0.88, 0.28, 0.17, 0.55, 0.17, Quaternion(-65, 0, -18))
+        Part("ArmR", "Models/Cylinder.mdl", bodyMat,  0.48, 0.88, 0.28, 0.17, 0.55, 0.17, Quaternion(-65, 0,  18))
+
+    elseif monsterType == "swarm" then
+        -- 群虫: 扁平圆盘 + 6根放射刺腿
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.22, 0, 1.30, 0.40, 1.30)
+        for i = 0, 5 do
+            local rad = math.rad(i * 60)
+            Part("Leg"..i, "Models/Cone.mdl", bodyMat,
+                math.sin(rad)*0.72, 0.12, math.cos(rad)*0.72,
+                0.13, 0.52, 0.13,
+                Quaternion(i*60, Vector3.UP) * Quaternion(55, Vector3.RIGHT))
+        end
+
+    elseif monsterType == "shellbeast" then
+        -- 甲壳兽: 宽扁方形躯干 + 深色隆起背甲 + 小头
+        Part("Body", "Models/Box.mdl", bodyMat, 0, 0.38, 0, 1.10, 0.62, 1.38)
+        local shellMat = bodyMat:Clone()
+        shellMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r*0.65, c.g*0.55, c.b*0.40, 1)))
+        shellMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*0.4, baseEmitG*0.4, baseEmitB*0.3)))
+        shellMat:SetShaderParameter("Metallic",  Variant(0.35))
+        shellMat:SetShaderParameter("Roughness", Variant(0.40))
+        Part("Shell", "Models/Sphere.mdl", shellMat, 0, 0.80, -0.08, 1.18, 0.68, 1.32)
+        Part("Head",  "Models/Sphere.mdl", bodyMat,  0, 0.54,  0.77, 0.44, 0.42, 0.44)
+
+    elseif monsterType == "sprinter" then
+        -- 疾行者: 流线型椭球 + 尖锥鼻 + 4条细腿
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.44, 0,    0.62, 0.58, 1.38)
+        Part("Nose", "Models/Cone.mdl",   bodyMat, 0, 0.44, 0.90, 0.26, 0.52, 0.26, Quaternion(90, Vector3.RIGHT))
+        for i, lp in ipairs({{-0.36,0.18,0.32},{0.36,0.18,0.32},{-0.36,0.18,-0.32},{0.36,0.18,-0.32}}) do
+            Part("Leg"..i, "Models/Cylinder.mdl", bodyMat, lp[1],lp[2],lp[3], 0.11,0.42,0.11)
+        end
+
+    elseif monsterType == "shielded" then
+        -- 护盾怪: 圆球身体 + 圆周尖刺 + 发光双眼
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.55, 0, 0.92, 0.88, 0.92)
+        for i = 0, 5 do
+            local rad = math.rad(i * 60)
+            Part("Sp"..i, "Models/Cone.mdl", bodyMat,
+                math.sin(rad)*0.90, 0.55 + math.cos(rad)*0.88*0.22, math.cos(rad)*0.90,
+                0.11, 0.34, 0.11,
+                Quaternion(i*60, Vector3.UP) * Quaternion(-90, Vector3.RIGHT))
+        end
+        local em = EyeMat(0.9,0.85,1.0, 1.8,1.5,3.2)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.22, 0.66, 0.43, 0.14,0.14,0.14)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.22, 0.66, 0.43, 0.14,0.14,0.14)
+
+    elseif monsterType == "energy_devourer" then
+        -- 吞能者: 球形核心 + 倾斜轨道环 + 黄色双眼
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.50, 0, 0.88,0.88,0.88)
+        local orbitMat = Material:new()
+        orbitMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+        orbitMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r, c.g, c.b, 0.72)))
+        orbitMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*2.2, baseEmitG*2.2, baseEmitB*2.2)))
+        orbitMat:SetShaderParameter("Metallic",  Variant(0.85))
+        orbitMat:SetShaderParameter("Roughness", Variant(0.15))
+        Part("Orbit", "Models/Torus.mdl", orbitMat, 0,0.50,0, 1.42,0.16,1.42, Quaternion(50, Vector3.RIGHT))
+        local em = EyeMat(1.0,0.9,0.2, 3.0,2.5,0.5)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.20,0.62,0.40, 0.15,0.15,0.15)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.20,0.62,0.40, 0.15,0.15,0.15)
+
+    elseif monsterType == "shatter_titan" then
+        -- 裂山巨像 Boss: 方形巨躯 + 宽肩 + 球头 + 粗腿 + 橙色眼
+        Part("Torso",    "Models/Box.mdl",    bodyMat, 0,0.68,0,  1.38,1.18,1.08)
+        Part("Shoulder", "Models/Box.mdl",    bodyMat, 0,1.28,0,  1.92,0.28,0.88)
+        Part("Head",     "Models/Sphere.mdl", bodyMat, 0,1.75,0,  0.82,0.82,0.82)
+        for i, lp in ipairs({{-0.48,0.20,0.30},{0.48,0.20,0.30},{-0.48,0.20,-0.30},{0.48,0.20,-0.30}}) do
+            Part("Leg"..i, "Models/Cylinder.mdl", bodyMat, lp[1],lp[2],lp[3], 0.34,0.52,0.34)
+        end
+        local em = EyeMat(1.0,0.55,0.1, 3.2,1.6,0.3)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.22,1.83,0.40, 0.18,0.18,0.18)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.22,1.83,0.40, 0.18,0.18,0.18)
+
+    elseif monsterType == "line_devourer" then
+        -- 吞线母体 Boss: 巨型球核 + 三重轨道环 + 四卫星 + 紫眼
+        Part("Core", "Models/Sphere.mdl", bodyMat, 0,0.88,0, 1.62,1.62,1.62)
+        local ringRots   = { Quaternion(0,0,0), Quaternion(60,Vector3.RIGHT), Quaternion(-50,Vector3.FORWARD) }
+        local ringAlphas = { 0.65, 0.50, 0.40 }
+        for i, rq in ipairs(ringRots) do
+            local rm = Material:new()
+            rm:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+            rm:SetShaderParameter("MatDiffColor",    Variant(Color(c.r,c.g,c.b, ringAlphas[i])))
+            rm:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*1.6, baseEmitG*1.6, baseEmitB*1.6)))
+            rm:SetShaderParameter("Metallic",  Variant(0.75))
+            rm:SetShaderParameter("Roughness", Variant(0.18))
+            Part("Ring"..i, "Models/Torus.mdl", rm, 0,0.88,0, 2.05,0.17,2.05, rq)
+        end
+        for i = 0, 3 do
+            local rad = math.rad(i*90 + 45)
+            Part("Sat"..i, "Models/Sphere.mdl", bodyMat,
+                math.sin(rad)*1.48, 0.88, math.cos(rad)*1.48, 0.34,0.34,0.34)
+        end
+        local em = EyeMat(0.85,0.25,1.0, 2.5,0.5,4.2)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.40,1.06,0.78, 0.25,0.25,0.25)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.40,1.06,0.78, 0.25,0.25,0.25)
+
+    else
+        -- 兜底
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0,0.50,0, 0.85,0.85,0.85)
+    end
+
+    return bodyMat, baseEmitR, baseEmitG, baseEmitB
+end
 
 -- ============================================================================
 -- 怪物类型定义 (对齐 enemies.json)
@@ -263,25 +407,8 @@ function M.SpawnMonster(monsterType, opts)
     local yaw = math.deg(math.atan(dx, dz))
     node.rotation = Quaternion(yaw, Vector3.UP)
 
-    -- === 模型 ===
-    local ufoName = UFO_MODELS[math.random(1, #UFO_MODELS)]
-    local model = node:CreateComponent("StaticModel")
-    model:SetModel(cache:GetResource("Model", "Meshes/TD/" .. ufoName .. ".mdl"))
-
-    -- 材质 (精英发光增强)
-    local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
-    local emitMult = isElite and 2.5 or 1.0
-    mat:SetShaderParameter("MatDiffColor", Variant(typeDef.color))
-    mat:SetShaderParameter("MatEmissiveColor", Variant(Color(
-        typeDef.emissive.r * emitMult,
-        typeDef.emissive.g * emitMult,
-        typeDef.emissive.b * emitMult
-    )))
-    mat:SetShaderParameter("Metallic", Variant(0.0))
-    mat:SetShaderParameter("Roughness", Variant(1.0))
-    model:SetMaterial(mat)
-    model.castShadows = true
+    -- === 复合模型 ===
+    local mat, baseEmitR, baseEmitG, baseEmitB = BuildMonsterVisuals(node, typeDef, monsterType, isElite)
 
     -- 移动方向 (初始: 朝向能源塔中心)
     local dirDx = 0 - sx
@@ -345,6 +472,12 @@ function M.SpawnMonster(monsterType, opts)
         armorBuffValue = typeDef.armorBuffValue or 0,
         armorCycleInterval = typeDef.armorCycleInterval or 0,
         armorBuffDuration = typeDef.armorBuffDuration or 0,
+        -- 受伤泛红
+        bodyMat = mat,
+        baseEmitR = baseEmitR,
+        baseEmitG = baseEmitG,
+        baseEmitB = baseEmitB,
+        flashTimer = 0,
         -- Boss: 吞线母体功率吸取
         drainTimer = 0,
         drainActiveTimer = 0,
@@ -499,6 +632,21 @@ function M.UpdateMonsters(dt)
             -- 更新血条
             Utils.UpdateHealthBar(m)
 
+            -- 受伤泛红帧更新
+            if m.flashTimer > 0 and m.bodyMat then
+                m.flashTimer = m.flashTimer - dt
+                local t = math.max(0, m.flashTimer / 0.30)  -- 1.0 → 0.0 衰减
+                m.bodyMat:SetShaderParameter("MatEmissiveColor", Variant(Color(
+                    m.baseEmitR + (4.5 - m.baseEmitR) * t,
+                    m.baseEmitG * (1.0 - t * 0.95),
+                    m.baseEmitB * (1.0 - t * 0.95)
+                )))
+                if m.flashTimer <= 0 then
+                    -- 归零时恢复基础颜色
+                    m.bodyMat:SetShaderParameter("MatEmissiveColor", Variant(Color(m.baseEmitR, m.baseEmitG, m.baseEmitB)))
+                end
+            end
+
             -- 到达终点: 伤害能源塔
             if reachedEnd then
                 EnergyTower.DamageEnergyTower(CONFIG.MonsterDmgToTower)
@@ -648,6 +796,8 @@ function M.DamageMonster(m, dmg, isEnergyDmg, skipText)
     dmg = math.max(1, math.floor(dmg + 0.5))
 
     m.hp = m.hp - dmg
+    -- 受伤泛红
+    m.flashTimer = 0.30
     if not skipText then
         Utils.SpawnDmgText(m.node.position, dmg)
     end

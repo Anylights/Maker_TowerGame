@@ -96,40 +96,72 @@ end
 -- ============================================================================
 
 function M.CreateTileFloor()
-    -- 使用 tile.mdl + 原始调色板材质，放大覆盖整个地图
-    -- tile.mdl BBox: 1×0.2×1，顶面 Y=0.2
-    local scaleXZ = CONFIG.MapHalfW * 2 + 4   -- 覆盖整张地图
+    local scaleXZ = CONFIG.MapHalfW * 2 + 4
+
+    -- 整块地面：无光照技术，输入线性空间颜色，gamma校正后屏幕显示 #44A06D
+    -- #44A06D sRGB(0.267,0.627,0.427) → 线性 = pow(sRGB, 2.2)
+    local floorMat = Material:new()
+    floorMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlit.xml"))
+    floorMat:SetShaderParameter("MatDiffColor", Variant(Vector4(0.062, 0.352, 0.143, 1.0)))
+
     local floor = GS.scene:CreateChild("Floor")
-    floor.position = Vector3(0, -0.2, 0)       -- 顶面与 y=0 平齐
-    floor.scale = Vector3(scaleXZ, 1, scaleXZ)  -- Y 方向不缩放保持原始厚度
+    floor.position = Vector3(0, -0.1, 0)
+    floor.scale    = Vector3(scaleXZ, 0.2, scaleXZ)
     local floorModel = floor:CreateComponent("StaticModel")
-    floorModel:SetModel(cache:GetResource("Model", "Meshes/TD/tile.mdl"))
-    floorModel:SetMaterial(cache:GetResource("Material", "Materials/TD/tile_00_colormap.xml"))
+    floorModel:SetModel(cache:GetResource("Model", "Models/Box.mdl"))
+    floorModel:SetMaterial(floorMat)
     floorModel.castShadows = false
 
-    -- 外围点缀装饰 tile（能源范围外随机放置少量带装饰的 tile）
-    local DECO_MODELS = {
-        { mdl = "Meshes/TD/tile-rock.mdl",    mat = "Materials/TD/tile-rock_00_colormap.xml" },
-        { mdl = "Meshes/TD/tile-tree.mdl",    mat = "Materials/TD/tile-tree_00_colormap.xml" },
-        { mdl = "Meshes/TD/tile-crystal.mdl", mat = "Materials/TD/tile-crystal_00_colormap.xml" },
-        { mdl = "Meshes/TD/tile-dirt.mdl",    mat = "Materials/TD/tile-dirt_00_colormap.xml" },
+    -- 装饰地块：tile 底板 + detail 装饰件（Kenney TD kit 配套使用）
+    local decoSets = {
+        {
+            tile   = "Meshes/TD/tile-rock.mdl",    tileMat   = "Materials/TD/tile-rock_00_colormap.xml",
+            detail = "Meshes/TD/detail-rocks.mdl", detailMat = "Materials/TD/detail-rocks_00_colormap.xml",
+        },
+        {
+            tile   = "Meshes/TD/tile-tree.mdl",    tileMat   = "Materials/TD/tile-tree_00_colormap.xml",
+            detail = "Meshes/TD/detail-tree.mdl",  detailMat = "Materials/TD/detail-tree_00_colormap.xml",
+        },
+        {
+            tile   = "Meshes/TD/tile-crystal.mdl", tileMat   = "Materials/TD/tile-crystal_00_colormap.xml",
+            detail = "Meshes/TD/detail-crystal.mdl", detailMat = "Materials/TD/detail-crystal_00_colormap.xml",
+        },
+        {
+            tile   = "Meshes/TD/tile-dirt.mdl",    tileMat   = "Materials/TD/tile-dirt_00_colormap.xml",
+            detail = "Meshes/TD/detail-dirt.mdl",  detailMat = "Materials/TD/detail-dirt_00_colormap.xml",
+        },
     }
 
     math.randomseed(42)
     local DECO_RANGE = CONFIG.EnergyRange + 14
     local decoParent = GS.scene:CreateChild("FloorDeco")
+
     for x = -DECO_RANGE, DECO_RANGE do
         for z = -DECO_RANGE, DECO_RANGE do
             local dist = math.sqrt(x * x + z * z)
             if dist > CONFIG.EnergyRange + 2 and math.random() < 0.06 then
-                local deco = DECO_MODELS[math.random(1, #DECO_MODELS)]
-                local child = decoParent:CreateChild("Deco")
-                child.position = Vector3(x, 0, z)
-                child.rotation = Quaternion(math.random(0, 3) * 90, Vector3.UP)
-                local m = child:CreateComponent("StaticModel")
-                m:SetModel(cache:GetResource("Model", deco.mdl))
-                m:SetMaterial(cache:GetResource("Material", deco.mat))
-                m.castShadows = true
+                local s   = decoSets[math.random(1, #decoSets)]
+                local rot = math.random(0, 3) * 90
+                local sc  = 0.8 + math.random() * 0.4
+
+                local group = decoParent:CreateChild("FloorDecoGroup")
+                group.position = Vector3(x, 0.0, z)
+                group.rotation = Quaternion(rot, Vector3.UP)
+                group.scale    = Vector3(sc, sc, sc)
+
+                -- 底板 tile
+                local tileNode = group:CreateChild("Tile")
+                local tm = tileNode:CreateComponent("StaticModel")
+                tm:SetModel(cache:GetResource("Model", s.tile))
+                tm:SetMaterial(cache:GetResource("Material", s.tileMat))
+                tm.castShadows = false
+
+                -- 上方 detail 装饰
+                local detailNode = group:CreateChild("Detail")
+                local dm = detailNode:CreateComponent("StaticModel")
+                dm:SetModel(cache:GetResource("Model", s.detail))
+                dm:SetMaterial(cache:GetResource("Material", s.detailMat))
+                dm.castShadows = true
             end
         end
     end
@@ -176,11 +208,8 @@ function M.CreateGrid()
     geom:Commit()
 
     local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-    mat:SetShaderParameter("MatDiffColor", Variant(MOEBIUS.GridColor))
-    mat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.20, 0.16, 0.10)))
-    mat:SetShaderParameter("Metallic", Variant(0.0))
-    mat:SetShaderParameter("Roughness", Variant(1.0))
+    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlit.xml"))
+    mat:SetShaderParameter("MatDiffColor", Variant(Color(0.10, 0.28, 0.12, 0.20)))
     geom:SetMaterial(mat)
 end
 
@@ -232,11 +261,8 @@ function M.CreateRangeCircle()
     BuildDiscGeometry(discGeom, r, segments)
 
     local discMat = Material:new()
-    discMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-    discMat:SetShaderParameter("MatDiffColor", Variant(Color(0.30, 0.55, 0.80, 0.10)))
-    discMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.08, 0.18, 0.35)))
-    discMat:SetShaderParameter("Metallic", Variant(0.0))
-    discMat:SetShaderParameter("Roughness", Variant(1.0))
+    discMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlit.xml"))
+    discMat:SetShaderParameter("MatDiffColor", Variant(Color(0.30, 0.55, 0.80, 0.08)))
     discGeom:SetMaterial(discMat)
 
     -- 层2: 边框线圈（加亮）
@@ -246,11 +272,8 @@ function M.CreateRangeCircle()
     BuildRingGeometry(ringGeom, r, segments)
 
     local ringMat = Material:new()
-    ringMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+    ringMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlit.xml"))
     ringMat:SetShaderParameter("MatDiffColor", Variant(Color(0.50, 0.75, 0.95, 0.55)))
-    ringMat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.25, 0.50, 0.80)))
-    ringMat:SetShaderParameter("Metallic", Variant(0.0))
-    ringMat:SetShaderParameter("Roughness", Variant(0.3))
     ringGeom:SetMaterial(ringMat)
 end
 
