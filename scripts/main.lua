@@ -15,6 +15,7 @@ local GameUI       = require("GameUI")
 local Artifact     = require("Artifact")
 local ArtifactVFX  = require("ArtifactVFX")
 local StatusEffect = require("StatusEffect")
+local SkillSystem  = require("SkillSystem")
 
 -- ============================================================================
 -- 生命周期
@@ -47,6 +48,28 @@ function Start()
 
     -- 圣器系统
     Artifact.Init()
+
+    -- 开发模式：预填充所有圣器 (上线前移除)
+    GS.devSkipWaveDrop = true
+    Artifact.FillDevInventory()
+
+    -- Phase 1 圣器逻辑验收测试 (开发期，上线前移除)
+    local ok, TestArtifacts = pcall(require, "TestArtifacts")
+    if ok and TestArtifacts then
+        TestArtifacts.RunPhase1()
+    end
+
+    -- Phase 2 圣器逻辑验收测试 (开发期，上线前移除)
+    local ok2, TestPhase2 = pcall(require, "TestPhase2")
+    if ok2 and TestPhase2 then
+        TestPhase2.RunPhase2()
+    end
+
+    -- Phase 3 圣器逻辑验收测试 (开发期，上线前移除)
+    local ok3, TestPhase3 = pcall(require, "TestPhase3")
+    if ok3 and TestPhase3 then
+        TestPhase3.RunPhase3()
+    end
 
     -- 悬停指示器 & 放置确认标记
     Scene.CreateHoverIndicator()
@@ -92,7 +115,15 @@ function HandleUpdate(eventType, eventData)
         end
     end
 
+    -- Q 键激活主动技能（消耗全部能量，触发已装备的技能类圣器）
+    if input:GetKeyPress(KEY_Q) then
+        SkillSystem.ActivateSkill()
+    end
+
     local dt = rawDt * GS.gameSpeed
+
+    -- 技能计时器每帧更新（overload_relay / energy_ammo 持续时间倒计时）
+    SkillSystem.Update(dt)
 
     -- 相机（始终可操作，不受倍速影响）
     Scene.HandleCameraPan()

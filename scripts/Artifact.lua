@@ -607,7 +607,18 @@ function M.Init()
     GS.artifactInventory = {}   -- 背包: { {id, defRef}, ... }
     GS.artifactDropPending = false  -- 是否有待处理的掉落选择
     GS.artifactDropCandidates = nil -- 3选1 候选列表
+    GS.devSkipWaveDrop = false      -- 开发模式: 跳过波次三选一
     print("[Artifact] System initialized")
+end
+
+--- 开发用：将所有圣器各放 3 份到背包（测试用）
+function M.FillDevInventory()
+    for id, _ in pairs(M.DEFS) do
+        for _ = 1, 3 do
+            M.AddToInventory(id)
+        end
+    end
+    print("[Artifact] Dev inventory filled: " .. #GS.artifactInventory .. " entries")
 end
 
 --- 添加圣器到背包
@@ -647,7 +658,7 @@ end
 -- 塔槽位系统 (每座塔: 3个等效配件槽，效力均为 100%)
 -- ============================================================================
 
-local SLOT_KEYS = { "slot1", "slot2", "slot3" }  -- 三个槽的 key
+local SLOT_KEYS = { "slot1", "slot2", "slot3", "slot4" }  -- 四个槽的 key（slot4 由 master_tower 解锁）
 
 --- 装备圣器到塔
 --- @param invIndex number 背包索引
@@ -666,6 +677,12 @@ function M.EquipToTower(invIndex, towerIndex, slotType)
 
     local entry = GS.artifactInventory[invIndex]
     local tower = GS.towers[towerIndex]
+
+    -- slot4 需要 master_tower 解锁（artExtraSlots > 0）
+    if slotType == "slot4" and (tower.artExtraSlots or 0) < 1 then
+        print("[Artifact] slot4 locked — equip master_tower first")
+        return false
+    end
 
     -- 检查是否已装备在其他地方
     if entry.equipped then
@@ -779,14 +796,34 @@ function M.RecalcTowerArtifactStats(towerIndex)
     tower.artDmgMult = 1.0        -- 伤害乘数
     tower.artFlatDmg = 0          -- 固定加伤（占位）
     tower.artAtkSpdMult = 1.0     -- 攻速乘数
+    tower.artRangeMult = 0        -- 射程百分比加成（累加）
+    tower.artRangeFlat = 0        -- 射程固定格数加成
     tower.artBulletForm = "bullet" -- 弹道形态
     tower.artAreaRadius = 0        -- 范围爆炸半径
+    tower.artPierceCount = 0       -- 穿透目标数
     tower.artOnHit = {}            -- 命中效果列表
     tower.artStopsAttack = false   -- 是否停止攻击（buff 类圣器）
     tower.artCritChance = 0        -- 暴击率加成
     tower.artCritMult = 1.0        -- 暴击倍数
     tower.artHitCounter = tower.artHitCounter or 0  -- 命中计数（蓄力击）
     tower.artPassiveEnergyTimer = tower.artPassiveEnergyTimer or 0  -- 凝聚塔计时
+    -- Phase 2 字段
+    tower.artPowerBorrow = false
+    tower.artPowerBorrowRange = 5
+    tower.artPowerBorrowRatio = 0.60
+    tower.artNearbyAtkSpdPenalty = false
+    tower.artNearbyAtkSpdPenaltyRange = 5
+    tower.artNearbyAtkSpdPenaltyVal = 0
+    tower.artLineMultiplier = 1.0
+    tower.artResonanceTrigger = false
+    tower.artHasEnergyPenalty = false
+    tower.artExtraSlots = 0         -- Phase 3: master_tower 解锁的额外槽数
+    tower.artNetworkLinks = false   -- Phase 3: network 次级能源线标志
+    tower.artNetworkRange = 3       -- Phase 3: 次级线搜索范围
+    tower.artNetworkMaxLinks = 3    -- Phase 3: 最多连接数
+    tower.artNetworkRatio = 0.35    -- Phase 3: 次级线线伤倍率
+    tower.artHasElementalReaction = false  -- Phase 3: elemental_reaction 标志
+    -- artNextShotMult / artNextShotPierce 由 SkillSystem 写入，此处不重置（避免清掉已激活的）
 
     local function applySlot(slotInvIdx)
         if not slotInvIdx then return end
@@ -806,6 +843,10 @@ function M.RecalcTowerArtifactStats(towerIndex)
                     tower.artDmgMult = tower.artDmgMult * (1.0 + eff.modifier)
                 elseif eff.stat == "attack_speed" then
                     tower.artAtkSpdMult = tower.artAtkSpdMult * (1.0 + eff.modifier)
+                elseif eff.stat == "range" then
+                    tower.artRangeMult = tower.artRangeMult + eff.modifier
+                elseif eff.stat == "range_flat" then
+                    tower.artRangeFlat = tower.artRangeFlat + eff.bonus
                 end
             elseif eff.type == "on_hit_status" then
                 table.insert(tower.artOnHit, {
@@ -843,6 +884,37 @@ function M.RecalcTowerArtifactStats(towerIndex)
                     tower.artEnergyOnKillAmount = eff.amount or 1
                 elseif eff.logic_id == "gold_drop_bonus" then
                     tower.artGoldDropBonus = (tower.artGoldDropBonus or 0) + (eff.bonus or 0)
+                elseif eff.logic_id == "pierce" then
+                    tower.artPierceCount = tower.artPierceCount + (eff.pierce_count or 1)
+
+                -- ---- Phase 2 ----
+                elseif eff.logic_id == "power_borrow" then
+                    tower.artPowerBorrow = true
+                    tower.artPowerBorrowRange = eff.range or 5
+                    tower.artPowerBorrowRatio = eff.borrow_ratio or 0.60
+                elseif eff.logic_id == "nearby_attack_speed_penalty" then
+                    tower.artNearbyAtkSpdPenalty = true
+                    tower.artNearbyAtkSpdPenaltyRange = eff.range or 5
+                    tower.artNearbyAtkSpdPenaltyVal = eff.penalty or -0.10
+                elseif eff.logic_id == "line_multiplier" then
+                    tower.artLineMultiplier = (tower.artLineMultiplier or 1.0)
+                                             * (eff.multiplier or 1.0)
+                elseif eff.logic_id == "resonance_trigger" then
+                    tower.artResonanceTrigger = true
+                elseif eff.logic_id == "energy_max_penalty" then
+                    -- 由 SkillSystem.RecalcEnergyMaxPenalty() 统一处理，此处仅标记
+                    tower.artHasEnergyPenalty = true
+
+                -- ---- Phase 3 ----
+                elseif eff.logic_id == "extra_slot" then
+                    tower.artExtraSlots = tower.artExtraSlots + (eff.extra_slots or 1)
+                elseif eff.logic_id == "network" then
+                    tower.artNetworkLinks = true
+                    tower.artNetworkRange = eff.secondary_range or 3
+                    tower.artNetworkMaxLinks = eff.max_links or 3
+                    tower.artNetworkRatio = eff.line_ratio or 0.35
+                elseif eff.logic_id == "elemental_reaction" then
+                    tower.artHasElementalReaction = true
                 end
             end
         end
@@ -854,31 +926,55 @@ function M.RecalcTowerArtifactStats(towerIndex)
                     tower.artDmgMult = tower.artDmgMult * (1.0 + ds.modifier)
                 elseif ds.stat == "attack_speed" then
                     tower.artAtkSpdMult = tower.artAtkSpdMult * (1.0 + ds.modifier)
+                elseif ds.stat == "range" then
+                    tower.artRangeMult = tower.artRangeMult + ds.modifier
+                end
+            elseif ds.type == "custom" then
+                if ds.logic_id == "nearby_attack_speed_penalty" then
+                    tower.artNearbyAtkSpdPenalty = true
+                    tower.artNearbyAtkSpdPenaltyRange = ds.range or 5
+                    tower.artNearbyAtkSpdPenaltyVal = math.abs(ds.penalty or 0.10)
                 end
             end
         end
     end
 
-    -- stops_tower_attack = true 的圣器会让攻击类圣器的变形弹道效果失效
-    for i = 1, 3 do
+    -- 第一遍：扫全部4个槽，收集 artExtraSlots（master_tower 解锁槽位）
+    -- stops_tower_attack 和其他效果同步应用
+    local maxSlots = 3  -- 默认3槽
+    for i = 1, 4 do
         applySlot(tower.slots[i])
     end
+    -- 第二遍：根据 artExtraSlots 决定实际可用槽数（额外槽的圣器已在上面生效）
+    -- 注：slot4 的圣器在第一遍已经被处理，artExtraSlots 仅用于 UI 显示和装备校验
 
     -- 如果塔停止攻击，重置弹道形态
     if tower.artStopsAttack then
         tower.artBulletForm = "bullet"
         tower.artAreaRadius = 0
     end
+
+    -- 任何单塔圣器变动后，重新计算全场光环影响
+    M.RecalcAllAuras()
+    -- 重新计算借力/攻速惩罚
+    M.RecalcAllPowerBorrow()
+    -- 重新计算能量上限惩罚
+    local SkillSystem = require("SkillSystem")
+    SkillSystem.RecalcEnergyMaxPenalty()
 end
 
 --- 确保所有塔都有圣器属性字段 (放置新塔后调用)
 function M.InitTowerSlots(tower)
-    tower.slots = { nil, nil, nil }  -- 三个等效配件槽
+    tower.slots = { nil, nil, nil, nil }  -- 四个等效配件槽（slot4 默认锁定，需 master_tower 解锁）
+    tower.artExtraSlots = 0               -- master_tower 解锁的额外槽数（>0 时 slot4 可用）
     tower.artDmgMult = 1.0
     tower.artFlatDmg = 0
     tower.artAtkSpdMult = 1.0
+    tower.artRangeMult = 0
+    tower.artRangeFlat = 0
     tower.artBulletForm = "bullet"
     tower.artAreaRadius = 0
+    tower.artPierceCount = 0
     tower.artOnHit = {}
     tower.artAutoPickupRange = 0
     tower.artStopsAttack = false
@@ -891,6 +987,34 @@ function M.InitTowerSlots(tower)
     tower.artEnergyOnKillChance = 0
     tower.artEnergyOnKillAmount = 0
     tower.artGoldDropBonus = 0
+    -- Phase 2 字段
+    tower.artPowerBorrow = false
+    tower.artPowerBorrowRange = 5
+    tower.artPowerBorrowRatio = 0.60
+    tower.artNearbyAtkSpdPenalty = false
+    tower.artNearbyAtkSpdPenaltyRange = 5
+    tower.artNearbyAtkSpdPenaltyVal = 0
+    tower.artLineMultiplier = 1.0
+    tower.artResonanceTrigger = false
+    tower.artHasEnergyPenalty = false
+    tower.artNextShotMult = 1.0
+    tower.artNextShotPierce = false
+    -- 注能弹药临时攻速 buff（由 SkillSystem 管理）
+    tower.artEnergyAmmoBuff = false
+    -- 借力圣器的周围塔攻速惩罚（由 RecalcAllPowerBorrow 填充）
+    tower.artBorrowPenalty = 0
+    -- Phase 3 字段
+    tower.artExtraSlots = 0
+    tower.artNetworkLinks = false
+    tower.artNetworkRange = 3
+    tower.artNetworkMaxLinks = 3
+    tower.artNetworkRatio = 0.35
+    tower.artHasElementalReaction = false
+    -- 来自光环的加成（由 RecalcAllAuras 填充）
+    tower.auraAtkSpdBonus = 0
+    tower.auraDmgBonus = 0
+    tower.auraRangeFlatBonus = 0
+    tower.auraCritBonus = 0
     tower.vfxNodes = {}  -- VFX 节点表 {artifactId → node}
 end
 
@@ -935,6 +1059,9 @@ end
 
 --- 触发波次结束掉落 (由 Wave.lua 调用)
 function M.TriggerWaveDrop()
+    -- 开发模式：跳过三选一，波次直接推进
+    if GS.devSkipWaveDrop then return end
+
     local candidates = M.GenerateDropCandidates()
     if #candidates == 0 then return end
 
@@ -1017,6 +1144,104 @@ function M.GetTowerArtifactInfo(towerIndex)
         end
     end
     return info
+end
+
+-- ============================================================================
+-- 光环系统：重算全场所有塔受到的光环加成
+-- 每次任何塔的圣器变动后调用（O(n²)，塔数量少影响可忽略）
+-- ============================================================================
+
+function M.RecalcAllAuras()
+    if not GS.towers then return end
+
+    -- 第一步：重置所有塔的光环字段
+    for _, t in ipairs(GS.towers) do
+        t.auraAtkSpdBonus  = 0
+        t.auraDmgBonus     = 0
+        t.auraRangeFlatBonus = 0
+        t.auraCritBonus    = 0
+    end
+
+    -- 第二步：遍历所有拥有 aura 效果的塔，向周围施加
+    for srcIdx, src in ipairs(GS.towers) do
+        for slotI = 1, 3 do
+            local invIdx = src.slots[slotI]
+            if invIdx then
+                local entry = GS.artifactInventory[invIdx]
+                if entry and entry.def then
+                    for _, eff in ipairs(entry.def.effects) do
+                        if eff.type == "aura" then
+                            local auraRange = eff.range or 5
+                            -- 对全场所有其他塔施加（不对自身施加，符合设定 "此塔不攻击"）
+                            for dstIdx, dst in ipairs(GS.towers) do
+                                if dstIdx ~= srcIdx then
+                                    local dx = dst.gx - src.gx
+                                    local dz = dst.gz - src.gz
+                                    local dist = math.sqrt(dx*dx + dz*dz)
+                                    if dist <= auraRange then
+                                        if eff.stat == "attack_speed" then
+                                            dst.auraAtkSpdBonus = dst.auraAtkSpdBonus + eff.bonus
+                                        elseif eff.stat == "damage" then
+                                            dst.auraDmgBonus = dst.auraDmgBonus + eff.bonus
+                                        elseif eff.stat == "range_flat" then
+                                            dst.auraRangeFlatBonus = dst.auraRangeFlatBonus + eff.bonus
+                                        elseif eff.stat == "crit_chance" then
+                                            dst.auraCritBonus = dst.auraCritBonus + eff.bonus
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================================
+-- 借力圣器系统：重算借力固定加伤 + 周围塔攻速惩罚
+-- 每次任何塔圣器变动后调用
+-- ============================================================================
+
+function M.RecalcAllPowerBorrow()
+    if not GS.towers then return end
+
+    -- 第一步：重置所有塔的借力惩罚
+    for _, t in ipairs(GS.towers) do
+        t.artBorrowPenalty = 0
+        -- 重置借力固定加伤（下面重新算）
+        if t.artPowerBorrow then
+            t.artFlatDmg = 0  -- 先清零，下面重新填
+        end
+    end
+
+    -- 第二步：处理每个有借力圣器的塔
+    for srcIdx, src in ipairs(GS.towers) do
+        if src.artPowerBorrow then
+            local range  = src.artPowerBorrowRange or 5
+            local ratio  = src.artPowerBorrowRatio or 0.60
+            local totalDelivered = 0
+
+            for dstIdx, dst in ipairs(GS.towers) do
+                if dstIdx ~= srcIdx then
+                    local dx = dst.gx - src.gx
+                    local dz = dst.gz - src.gz
+                    local dist = math.sqrt(dx*dx + dz*dz)
+                    if dist <= range then
+                        -- 累加范围内所有其他塔的 delivered
+                        totalDelivered = totalDelivered + (dst.delivered or 0)
+                        -- 对范围内其他塔施加攻速惩罚
+                        dst.artBorrowPenalty = dst.artBorrowPenalty
+                                             + math.abs(src.artNearbyAtkSpdPenaltyVal or 0.10)
+                    end
+                end
+            end
+
+            -- 借力加伤 = 范围内 delivered 总和 × ratio
+            src.artFlatDmg = (src.artFlatDmg or 0) + totalDelivered * ratio
+        end
+    end
 end
 
 return M

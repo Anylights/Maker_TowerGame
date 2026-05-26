@@ -139,6 +139,13 @@ local detailDemolishBtn_ = nil
 local placementBubble_ = nil
 local placementBubbleCostLabel_ = nil
 
+-- 圣器 Hover Tooltip
+local tooltipPanel_ = nil
+local tooltipNameLabel_ = nil
+local tooltipRarityLabel_ = nil
+local tooltipDescLabel_ = nil
+local tooltipDownsideLabel_ = nil
+
 -- ============================================================================
 -- 圣器视觉映射
 -- ============================================================================
@@ -615,6 +622,9 @@ function M.CreateGameUI()
     placementBubble_ = M.BuildPlacementBubble()
 
     -- ---- 统一 Root ----
+    -- Tooltip 面板（最后添加，保证在最顶层）
+    tooltipPanel_ = M.BuildTooltipPanel()
+
     gameRoot_ = UI.Panel {
         width = "100%", height = "100%",
         pointerEvents = "box-none",
@@ -624,6 +634,7 @@ function M.CreateGameUI()
             towerDetailPanel_,
             placementBubble_,
             dragCtx_,
+            tooltipPanel_,
         },
     }
 
@@ -672,23 +683,58 @@ function M.BuildInventoryPanel()
             },
         })
     else
+        -- 按 id 分组堆叠：{ id -> { unequippedIdx, equippedCount, totalCount } }
+        local groups = {}   -- 保序列表：{ id, firstUnequippedIdx, unequippedCount, equippedCount }
+        local order = {}    -- 保持首次出现顺序
+        local seen = {}
         for i, entry in ipairs(GS.artifactInventory) do
+            local id = entry.id
+            if not seen[id] then
+                seen[id] = true
+                table.insert(order, id)
+                groups[id] = { id = id, firstUnequippedIdx = nil, unequippedCount = 0, equippedCount = 0 }
+            end
+            if entry.equipped then
+                groups[id].equippedCount = groups[id].equippedCount + 1
+            else
+                groups[id].unequippedCount = groups[id].unequippedCount + 1
+                if not groups[id].firstUnequippedIdx then
+                    groups[id].firstUnequippedIdx = i
+                end
+            end
+        end
+
+        local slotCounter = 0
+        for _, id in ipairs(order) do
+            local g = groups[id]
+            local entry = GS.artifactInventory[g.firstUnequippedIdx or 1]
+            -- 若全部已装备则用任意一个 entry 显示（置灰）
+            if not entry then
+                for _, e in ipairs(GS.artifactInventory) do
+                    if e.id == id then entry = e; break end
+                end
+            end
+            if not entry then goto continue end
+
             local icon = ARTIFACT_ICONS[entry.id] or "?"
             local rc = rarityColor(entry.def.rarity)
+            local totalCount = g.unequippedCount + g.equippedCount
 
+            -- 可拖拽 itemData 只在有未装备时提供
             local itemData = nil
-            if not entry.equipped then
+            if g.firstUnequippedIdx then
                 itemData = {
                     id = entry.id,
                     name = entry.def.name,
                     icon = icon,
                     type = "artifact",
-                    invIndex = i,
+                    invIndex = g.firstUnequippedIdx,
                 }
             end
 
+            slotCounter = slotCounter + 1
             local slot = ItemSlot {
-                slotId = "inv_" .. i,
+                slotId = "inv_grp_" .. slotCounter,
                 slotCategory = "inventory",
                 slotType = "any",
                 item = itemData,
@@ -696,33 +742,62 @@ function M.BuildInventoryPanel()
                 size = 52,
             }
 
-            local statusText = ""
-            if entry.equipped then
-                local tower = GS.towers[entry.towerIndex]
-                local slotName = entry.slotType == "main" and "主" or "副"
-                statusText = slotName .. "槽"
-            end
+            -- 数量徽章（叠在图标右下角）
+            local badgeNode = (totalCount > 1) and UI.Panel {
+                position = "absolute",
+                bottom = 1, right = 1,
+                paddingX = 3, paddingY = 1,
+                backgroundColor = { 0, 0, 0, 200 },
+                borderRadius = 3,
+                pointerEvents = "none",
+                children = {
+                    UI.Label {
+                        text = "×" .. totalCount,
+                        fontSize = 9, fontColor = CLR.gold,
+                        pointerEvents = "none",
+                    },
+                },
+            } or nil
 
+            -- 装备状态文字（有装备时显示）
+            local statusNode = (g.equippedCount > 0) and UI.Label {
+                text = "已装" .. g.equippedCount,
+                fontSize = 7, fontColor = CLR.success,
+                textAlign = "center",
+            } or nil
+
+            -- 图标容器（相对定位，用于放置数量徽章）
+            local iconContainer = UI.Panel {
+                position = "relative",
+                width = 52, height = 52,
+                flexShrink = 0,
+                children = badgeNode and { slot, badgeNode } or { slot },
+            }
+
+            local def = entry.def
             local slotWrapper = UI.Panel {
                 flexDirection = "column", gap = 1, alignItems = "center",
                 width = 58, flexShrink = 0,
+                onPointerEnter = function(evt, _)
+                    M.ShowArtifactTooltip(def, evt.x, evt.y)
+                end,
+                onPointerLeave = function(_, _)
+                    M.HideArtifactTooltip()
+                end,
                 children = {
-                    slot,
+                    iconContainer,
                     UI.Label {
                         text = entry.def.name,
                         fontSize = 8, fontColor = rc,
                         textAlign = "center", maxWidth = 56,
                     },
-                    entry.equipped and UI.Label {
-                        text = statusText,
-                        fontSize = 7, fontColor = CLR.success,
-                        textAlign = "center",
-                    } or nil,
+                    statusNode,
                 },
             }
 
-            invSlots_[i] = slot
+            invSlots_[slotCounter] = slot
             table.insert(slotChildren, slotWrapper)
+            ::continue::
         end
     end
 
@@ -921,10 +996,34 @@ function M.BuildTowerDetailPanel()
                 alignItems = "flex-start",
                 children = {
                     UI.Panel { flexDirection = "column", gap = 4, alignItems = "center",
+                        onPointerEnter = function(evt, _)
+                            if not currentDetailTower_ then return end
+                            local t = GS.towers[currentDetailTower_]
+                            local idx = t and t.slots and t.slots[1]
+                            local e = idx and GS.artifactInventory[idx]
+                            if e then M.ShowArtifactTooltip(e.def, evt.x, evt.y) end
+                        end,
+                        onPointerLeave = function() M.HideArtifactTooltip() end,
                         children = { detailSlots_[1], makeUnequipBtn(1) } },
                     UI.Panel { flexDirection = "column", gap = 4, alignItems = "center",
+                        onPointerEnter = function(evt, _)
+                            if not currentDetailTower_ then return end
+                            local t = GS.towers[currentDetailTower_]
+                            local idx = t and t.slots and t.slots[2]
+                            local e = idx and GS.artifactInventory[idx]
+                            if e then M.ShowArtifactTooltip(e.def, evt.x, evt.y) end
+                        end,
+                        onPointerLeave = function() M.HideArtifactTooltip() end,
                         children = { detailSlots_[2], makeUnequipBtn(2) } },
                     UI.Panel { flexDirection = "column", gap = 4, alignItems = "center",
+                        onPointerEnter = function(evt, _)
+                            if not currentDetailTower_ then return end
+                            local t = GS.towers[currentDetailTower_]
+                            local idx = t and t.slots and t.slots[3]
+                            local e = idx and GS.artifactInventory[idx]
+                            if e then M.ShowArtifactTooltip(e.def, evt.x, evt.y) end
+                        end,
+                        onPointerLeave = function() M.HideArtifactTooltip() end,
                         children = { detailSlots_[3], makeUnequipBtn(3) } },
                 },
             },
@@ -935,6 +1034,105 @@ function M.BuildTowerDetailPanel()
     }
 
     return panel
+end
+
+-- ============================================================================
+-- 圣器 Hover Tooltip
+-- ============================================================================
+
+function M.BuildTooltipPanel()
+    tooltipNameLabel_ = UI.Label {
+        text = "名称", fontSize = 13, fontColor = CLR.gold,
+        textAlign = "left",
+    }
+    tooltipRarityLabel_ = UI.Label {
+        text = "稀有度", fontSize = 10, fontColor = CLR.muted,
+        textAlign = "left",
+    }
+    tooltipDescLabel_ = UI.Label {
+        text = "描述", fontSize = 11, fontColor = CLR.secondary,
+        textAlign = "left", maxWidth = 200,
+    }
+    tooltipDownsideLabel_ = UI.Label {
+        text = "", fontSize = 10, fontColor = CLR.danger,
+        textAlign = "left", maxWidth = 200,
+    }
+
+    local panel = UI.Panel {
+        position = "absolute",
+        top = -9999, left = -9999,
+        display = "none",
+        flexDirection = "column", gap = 5,
+        paddingX = 12, paddingY = 10,
+        backgroundColor = { 18, 30, 60, 242 },
+        borderRadius = 5,
+        borderWidth = 2, borderColor = CLR.panelBorder,
+        boxShadow = {{ x = 4, y = 4, blur = 0, color = { 0, 0, 0, 120 } }},
+        pointerEvents = "none",
+        minWidth = 170, maxWidth = 220,
+        children = {
+            tooltipNameLabel_,
+            tooltipRarityLabel_,
+            UI.Panel { width = "100%", height = 1, backgroundColor = CLR.divider },
+            tooltipDescLabel_,
+            tooltipDownsideLabel_,
+        },
+    }
+    return panel
+end
+
+--- 在指定屏幕位置显示圣器 tooltip
+--- @param def table 圣器定义
+--- @param screenX number 屏幕 X（像素）
+--- @param screenY number 屏幕 Y（像素）
+function M.ShowArtifactTooltip(def, screenX, screenY)
+    if not tooltipPanel_ or not def then return end
+
+    local rarityNames = { white = "普通", blue = "精良", purple = "史诗", gold = "传说" }
+    local rarityName = rarityNames[def.rarity] or def.rarity
+
+    tooltipNameLabel_:SetStyle({ text = def.name, fontColor = rarityColor(def.rarity) })
+    tooltipRarityLabel_:SetStyle({ text = "[ " .. rarityName .. " · " .. (def.category or "") .. " ]" })
+    tooltipDescLabel_:SetStyle({ text = def.description or "" })
+
+    -- 负面效果汇总
+    local downsides = {}
+    if def.downsides then
+        for _, d in ipairs(def.downsides) do
+            if d.type == "stat_modifier" and d.modifier and d.modifier < 0 then
+                local pct = math.floor(math.abs(d.modifier) * 100 + 0.5)
+                local statNames = {
+                    damage = "单发伤害", attack_speed = "攻速",
+                    range = "射程", range_flat = "射程",
+                }
+                local sn = statNames[d.stat] or d.stat
+                table.insert(downsides, sn .. " -" .. pct .. "%")
+            end
+        end
+    end
+    if #downsides > 0 then
+        tooltipDownsideLabel_:SetStyle({ text = "▼ " .. table.concat(downsides, "  "), display = "flex" })
+    else
+        tooltipDownsideLabel_:SetStyle({ display = "none" })
+    end
+
+    -- 位置：优先显示在光标右侧，靠近屏幕边缘时左移
+    local w = graphics:GetWidth() / graphics:GetDPR()
+    local tipW = 220
+    local tipX = screenX + 14
+    if tipX + tipW > w - 10 then
+        tipX = screenX - tipW - 14
+    end
+    local tipY = screenY - 10
+
+    tooltipPanel_:SetStyle({ display = "flex", top = math.floor(tipY), left = math.floor(tipX) })
+end
+
+--- 隐藏 tooltip
+function M.HideArtifactTooltip()
+    if tooltipPanel_ then
+        tooltipPanel_:SetStyle({ display = "none", top = -9999, left = -9999 })
+    end
 end
 
 -- ============================================================================
