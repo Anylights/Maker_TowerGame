@@ -14,6 +14,12 @@ local M = {}
 local rangeDiscNode_ = nil
 local rangeRingNode_ = nil
 
+-- 出怪方向弧段节点列表 (在范围圈上标红)
+-- spawnArcNodes_[i] = { node, mat, isActive }
+local spawnArcNodes_ = {}
+-- 弧段动画时间
+local spawnArcTime_ = 0
+
 -- 升级提示箭头
 local upgradeHintNode_ = nil
 
@@ -246,6 +252,31 @@ local function BuildRingGeometry(geom, r, segments)
     geom:Commit()
 end
 
+--- 辅助: 在范围圈上构建一段宽弧带 (TRIANGLE_LIST)
+--- 用于出怪方向高亮, r=半径, centerAngle=中心角度, halfAngle=半角, thickness=径向宽度
+local function BuildArcBandGeometry(geom, r, centerAngle, halfAngle, thickness, segments)
+    geom:BeginGeometry(0, TRIANGLE_LIST)
+    local r0 = r - thickness * 0.5
+    local r1 = r + thickness * 0.5
+    for i = 0, segments - 1 do
+        local a0 = centerAngle - halfAngle + (i / segments) * halfAngle * 2
+        local a1 = centerAngle - halfAngle + ((i + 1) / segments) * halfAngle * 2
+        local cos0, sin0 = math.cos(a0), math.sin(a0)
+        local cos1, sin1 = math.cos(a1), math.sin(a1)
+        local il = Vector3(cos0 * r0, 0, sin0 * r0)
+        local ir = Vector3(cos1 * r0, 0, sin1 * r0)
+        local or_ = Vector3(cos1 * r1, 0, sin1 * r1)
+        local ol = Vector3(cos0 * r1, 0, sin0 * r1)
+        geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
+        geom:DefineVertex(ir); geom:DefineNormal(Vector3.UP)
+        geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
+        geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
+        geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
+        geom:DefineVertex(ol); geom:DefineNormal(Vector3.UP)
+    end
+    geom:Commit()
+end
+
 function M.CreateRangeCircle()
     local parent = GS.scene:CreateChild("RangeCircle")
     parent.position = Vector3(0, 0, 0)
@@ -297,6 +328,103 @@ function M.UpdateRangeCircle()
     if rangeRingNode_ then
         local ringGeom = rangeRingNode_:GetComponent("CustomGeometry")
         BuildRingGeometry(ringGeom, r, segments)
+    end
+
+    -- 重建出怪弧段 (半径变了需要重建)
+    M.RebuildSpawnArcs()
+end
+
+-- ============================================================================
+-- 出怪方向弧段 (在范围圈上标红/灰)
+-- ============================================================================
+
+local SPAWN_ARC_HALF_ANGLE = math.rad(20)   -- 弧段半角 ±20°
+local SPAWN_ARC_THICKNESS  = 0.45           -- 弧段径向宽度(米)
+local SPAWN_ARC_SEGMENTS   = 20             -- 弧段细分
+
+--- 重建出怪方向弧段节点 (大波次更新或升级后调用)
+--- 由 Wave.lua 调用: 传入大波次3个固定角度
+function M.RebuildSpawnArcs(bigWaveAngles)
+    if not EnergyTower then
+        EnergyTower = require("EnergyTower")
+    end
+    local r = EnergyTower.GetEnergyRange() + 0.5
+    local y = CONFIG.GridY + 0.025  -- 高于范围圈轮廓线
+
+    -- 清除旧弧段
+    for _, arc in ipairs(spawnArcNodes_) do
+        if arc.node then arc.node:Remove() end
+    end
+    spawnArcNodes_ = {}
+
+    if not bigWaveAngles or #bigWaveAngles == 0 then return end
+
+    local tech = cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml")
+
+    for i, angle in ipairs(bigWaveAngles) do
+        local arcNode = GS.scene:CreateChild("SpawnArc" .. i)
+        arcNode.position = Vector3(0, y, 0)
+        local geom = arcNode:CreateComponent("CustomGeometry")
+        BuildArcBandGeometry(geom, r, angle, SPAWN_ARC_HALF_ANGLE, SPAWN_ARC_THICKNESS, SPAWN_ARC_SEGMENTS)
+
+        local mat = Material:new()
+        mat:SetTechnique(0, tech)
+        -- 默认灰色 (非活跃)
+        mat:SetShaderParameter("MatDiffColor",    Variant(Color(0.55, 0.55, 0.55, 0.30)))
+        mat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.1, 0.1, 0.1)))
+        mat:SetShaderParameter("Metallic",  Variant(0.0))
+        mat:SetShaderParameter("Roughness", Variant(1.0))
+        geom:SetMaterial(mat)
+
+        table.insert(spawnArcNodes_, { node = arcNode, mat = mat, angle = angle, isActive = false })
+    end
+end
+
+--- 更新活跃方向弧段颜色 (每小波开始时调用)
+--- activeAngles: 本小波活跃方向角度列表
+function M.UpdateSpawnArcActive(activeAngles)
+    -- 构建活跃角度集合 (匹配最近的弧段)
+    local activeSet = {}
+    for _, a in ipairs(activeAngles) do
+        for i, arc in ipairs(spawnArcNodes_) do
+            local diff = math.abs(arc.angle - a)
+            if diff > math.pi then diff = math.pi * 2 - diff end
+            if diff < 0.01 then  -- 角度完全匹配 (同一个方向)
+                activeSet[i] = true
+            end
+        end
+    end
+    for i, arc in ipairs(spawnArcNodes_) do
+        arc.isActive = activeSet[i] == true
+    end
+end
+
+--- 每帧更新弧段动画 (呼吸/闪烁)
+function M.UpdateSpawnArcs(dt)
+    if #spawnArcNodes_ == 0 then return end
+    spawnArcTime_ = spawnArcTime_ + dt
+
+    -- 活跃弧段: 红色呼吸脉冲
+    -- 非活跃弧段: 暗灰色静态
+    local pulseMul = 0.75 + 0.25 * math.sin(spawnArcTime_ * 2.0 * math.pi)
+
+    for _, arc in ipairs(spawnArcNodes_) do
+        if arc.mat then
+            if arc.isActive then
+                -- 红色, 带呼吸
+                local a = 0.45 * pulseMul + 0.25
+                arc.mat:SetShaderParameter("MatDiffColor",
+                    Variant(Color(1.0, 0.08, 0.05, a)))
+                arc.mat:SetShaderParameter("MatEmissiveColor",
+                    Variant(Color(0.6 * pulseMul, 0.02, 0.01)))
+            else
+                -- 暗灰
+                arc.mat:SetShaderParameter("MatDiffColor",
+                    Variant(Color(0.50, 0.50, 0.50, 0.22)))
+                arc.mat:SetShaderParameter("MatEmissiveColor",
+                    Variant(Color(0.05, 0.05, 0.05)))
+            end
+        end
     end
 end
 

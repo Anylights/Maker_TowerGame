@@ -444,11 +444,8 @@ function M.DemolishTower(towerIndex)
     if towerIndex < 1 or towerIndex > #GS.towers then return false end
     local tower = GS.towers[towerIndex]
 
-    -- 返还比例: 准备阶段 70%, 战斗阶段 40%
-    local ratio = 0.4
-    if GS.wavePhase == "preparing" then
-        ratio = 0.7
-    end
+    -- 返还比例: 统一 60%
+    local ratio = 0.6
 
     -- 返还金币 (基于该塔的造价)
     local originalCost = M.GetTowerOriginalCost(towerIndex)

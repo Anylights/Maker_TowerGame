@@ -416,6 +416,57 @@ function M.SpawnMonster(monsterType, opts)
     local dirLen = math.sqrt(dirDx * dirDx + dirDz * dirDz)
     local dir = dirLen > 0.01 and Vector3(dirDx / dirLen, 0, dirDz / dirLen) or Vector3(0, 0, 1)
 
+    -- 脚底红色位置指示圆圈
+    -- 圆圈挂在 node 子节点上:
+    --   node.position.y = 0 (贴地), node.scale = (s,s,s)
+    --   子节点世界Y = 0 + s * localY  => localY = groundY/s
+    --   子节点世界半径 = s * localScale  => localScale = worldRadius/s
+    local footCircleNode = node:CreateChild("FootCircle")
+    local groundY  = CONFIG.GridY + 0.012   -- 贴地稍微浮起避免 z-fighting
+    local invS = 1.0 / s
+    -- XZ 方向: 圆圈世界半径随怪物大小略变, 但不会太小
+    local circleWorldR = math.max(0.28, s * 1.15)
+    footCircleNode.position = Vector3(0, groundY * invS, 0)
+    footCircleNode.scale    = Vector3(invS * circleWorldR, 1.0, invS * circleWorldR)
+
+    local footGeom = footCircleNode:CreateComponent("CustomGeometry")
+    do
+        -- 环形带: 贴地平放, Y轴朝上
+        local segs = 20
+        local innerR = 0.88
+        local outerR = 1.0
+        footGeom:BeginGeometry(0, TRIANGLE_LIST)
+        for i = 0, segs - 1 do
+            local a0 = (i / segs) * math.pi * 2
+            local a1 = ((i + 1) / segs) * math.pi * 2
+            local ci0, si0 = math.cos(a0), math.sin(a0)
+            local ci1, si1 = math.cos(a1), math.sin(a1)
+            footGeom:DefineVertex(Vector3(ci0 * innerR, 0, si0 * innerR)); footGeom:DefineNormal(Vector3.UP)
+            footGeom:DefineVertex(Vector3(ci1 * innerR, 0, si1 * innerR)); footGeom:DefineNormal(Vector3.UP)
+            footGeom:DefineVertex(Vector3(ci1 * outerR, 0, si1 * outerR)); footGeom:DefineNormal(Vector3.UP)
+            footGeom:DefineVertex(Vector3(ci0 * innerR, 0, si0 * innerR)); footGeom:DefineNormal(Vector3.UP)
+            footGeom:DefineVertex(Vector3(ci1 * outerR, 0, si1 * outerR)); footGeom:DefineNormal(Vector3.UP)
+            footGeom:DefineVertex(Vector3(ci0 * outerR, 0, si0 * outerR)); footGeom:DefineNormal(Vector3.UP)
+        end
+        footGeom:Commit()
+        local footMat = Material:new()
+        footMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+        -- Boss 用橙色, 精英用品红, 普通用红色
+        local fr, fg, fb, fa
+        if isBoss then
+            fr, fg, fb, fa = 1.0, 0.45, 0.0, 0.85
+        elseif isElite then
+            fr, fg, fb, fa = 1.0, 0.10, 0.85, 0.78
+        else
+            fr, fg, fb, fa = 0.95, 0.08, 0.05, 0.65
+        end
+        footMat:SetShaderParameter("MatDiffColor",    Variant(Color(fr, fg, fb, fa)))
+        footMat:SetShaderParameter("MatEmissiveColor", Variant(Color(fr * 0.55, fg * 0.15, fb * 0.15)))
+        footMat:SetShaderParameter("Metallic",  Variant(0.0))
+        footMat:SetShaderParameter("Roughness", Variant(1.0))
+        footGeom:SetMaterial(footMat)
+    end
+
     -- 血条
     local hpBg, hpFill, fillMat = Utils.CreateHealthBar(node)
 

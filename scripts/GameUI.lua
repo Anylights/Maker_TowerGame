@@ -130,8 +130,10 @@ local dragCtx_ = nil
 local invSlots_ = {}
 local detailSlots_ = { nil, nil, nil }  -- 三个等效配件槽 ItemSlot
 local detailTitleLabel_ = nil
+local detailEnergyLabel_ = nil
 local detailStatsLabel_ = nil
 local detailDemolishLabel_ = nil
+local detailDemolishBtn_ = nil
 
 -- 建塔确认气泡
 local placementBubble_ = nil
@@ -815,22 +817,23 @@ end
 -- ============================================================================
 
 function M.BuildTowerDetailPanel()
+    -- 用 Panel+Label 手动实现按钮，彻底绕开 UI.Button 的阴影层渲染问题
+
     detailTitleLabel_ = UI.Label {
-        text = "塔详情",
-        fontSize = 14, fontColor = CLR.gold,
-        textAlign = "center",
+        text = "防御塔", fontSize = 13, fontColor = CLR.gold,
     }
-    detailDemolishLabel_ = UI.Label {
-        text = "返还: —",
-        fontSize = 9, fontColor = { 200, 120, 120, 200 },
-        textAlign = "center",
+    detailEnergyLabel_ = UI.Label {
+        text = "能量: 0%", fontSize = 11, fontColor = { 120, 220, 180, 255 },
     }
     detailStatsLabel_ = UI.Label {
-        text = "",
-        fontSize = 10, fontColor = CLR.secondary,
-        whiteSpace = "normal", wordBreak = "break-word",
-        textAlign = "center",
-        maxWidth = 220,
+        text = "", fontSize = 11, fontColor = CLR.secondary, textAlign = "center",
+    }
+
+    -- 回收按钮文字 label（用于动态更新金额）
+    detailDemolishBtn_ = UI.Label {
+        text = "回收 +-- 🪙", fontSize = 12,
+        fontColor = { 255, 255, 255, 255 }, textAlign = "center",
+        pointerEvents = "none",
     }
 
     local slotLabels = { "①", "②", "③" }
@@ -841,76 +844,93 @@ function M.BuildTowerDetailPanel()
             slotType = "artifact",
             item = nil,
             dragContext = dragCtx_,
-            size = 46,
+            size = 42,
             slotTypeIcon = slotLabels[i],
             showTypeIcon = true,
         }
     end
 
+    -- 构建"卸下"按钮（Panel+Label 手动实现）
+    local function makeUnequipBtn(idx)
+        return UI.Panel {
+            width = 54, height = 22,
+            backgroundColor = { 55, 75, 120, 230 },
+            borderRadius = 3,
+            borderWidth = 1, borderColor = { 90, 120, 185, 255 },
+            justifyContent = "center", alignItems = "center",
+            cursor = "pointer",
+            onClick = function()
+                if not currentDetailTower_ then return end
+                local tower = GS.towers[currentDetailTower_]
+                if tower and tower.slots and tower.slots[idx] then
+                    Artifact.UnequipFromTower(tower.slots[idx])
+                    M.RefreshTowerDetail()
+                    M.RefreshInventoryPanel()
+                end
+            end,
+            children = {
+                UI.Label { text = "卸下", fontSize = 9, fontColor = { 255, 255, 255, 255 } },
+            },
+        }
+    end
+
+    -- 回收按钮容器（Panel+Label 手动实现）
+    local demolishContainer = UI.Panel {
+        width = 200, height = 30,
+        backgroundColor = { 185, 40, 40, 255 },
+        borderRadius = 4,
+        justifyContent = "center", alignItems = "center",
+        cursor = "pointer",
+        onClick = function()
+            if not currentDetailTower_ then return end
+            local Tower = require("Tower")
+            Tower.DemolishTower(currentDetailTower_)
+            M.HideTowerDetail()
+            local GameUI = require("GameUI")
+            GameUI.RefreshUpgradePanel()
+        end,
+        children = { detailDemolishBtn_ },
+    }
+
     local panel = UI.Panel {
         position = "absolute", top = -999, left = -999,
         width = 240,
-        flexDirection = "column", gap = 4,
+        flexDirection = "column", gap = 6,
         backgroundColor = CLR.panelBg,
-        borderRadius = 0, paddingX = 12, paddingY = 10,
+        borderRadius = 4, paddingX = 12, paddingY = 10,
         borderWidth = 2, borderColor = CLR.panelBorder,
         boxShadow = CLR.panelShadow,
         display = "none",
         pointerEvents = "box-none",
         alignItems = "center",
         children = {
-            detailTitleLabel_,
-            UI.Panel { width = "90%", height = 1, backgroundColor = CLR.divider },
-            detailStatsLabel_,
-            -- 三个等效配件槽（横排）
+            -- 标题行：防御塔（左） | 能量（右），两侧有内边距
             UI.Panel {
-                flexDirection = "row", gap = 6,
+                flexDirection = "row", width = "100%",
+                paddingX = 4,
+                justifyContent = "space-between", alignItems = "center",
+                children = { detailTitleLabel_, detailEnergyLabel_ },
+            },
+            UI.Panel { width = "92%", height = 1, backgroundColor = CLR.divider },
+            -- 属性：伤害 | 攻速（单行，| 分隔）
+            detailStatsLabel_,
+            UI.Panel { width = "92%", height = 1, backgroundColor = CLR.divider },
+            -- 三个装备槽（无标签）
+            UI.Panel {
+                flexDirection = "row", gap = 10,
                 alignItems = "flex-start",
-                children = (function()
-                    local cols = {}
-                    for i = 1, 3 do
-                        local idx = i  -- 闭包捕获
-                        table.insert(cols, UI.Panel {
-                            flexDirection = "column", gap = 2, alignItems = "center",
-                            children = {
-                                UI.Label { text = "槽" .. i, fontSize = 9, fontColor = CLR.secondary },
-                                detailSlots_[i],
-                                UI.Button {
-                                    text = "卸下", width = 52, height = 20, fontSize = 8,
-                                    onClick = function()
-                                        if not currentDetailTower_ then return end
-                                        local tower = GS.towers[currentDetailTower_]
-                                        if tower and tower.slots and tower.slots[idx] then
-                                            Artifact.UnequipFromTower(tower.slots[idx])
-                                            M.RefreshTowerDetail()
-                                            M.RefreshInventoryPanel()
-                                        end
-                                    end,
-                                },
-                            },
-                        })
-                    end
-                    return cols
-                end)(),
+                children = {
+                    UI.Panel { flexDirection = "column", gap = 4, alignItems = "center",
+                        children = { detailSlots_[1], makeUnequipBtn(1) } },
+                    UI.Panel { flexDirection = "column", gap = 4, alignItems = "center",
+                        children = { detailSlots_[2], makeUnequipBtn(2) } },
+                    UI.Panel { flexDirection = "column", gap = 4, alignItems = "center",
+                        children = { detailSlots_[3], makeUnequipBtn(3) } },
+                },
             },
-            -- 分隔线
-            UI.Panel { width = "90%", height = 1, backgroundColor = CLR.divider },
-            -- 回收按钮行
-            detailDemolishLabel_,
-            UI.Button {
-                text = "回收防御塔", width = 180, height = 28, fontSize = 11,
-                backgroundColor = { 140, 35, 35, 220 },
-                borderColor = { 200, 60, 60, 255 },
-                fontColor = { 255, 210, 210, 255 },
-                onClick = function()
-                    if not currentDetailTower_ then return end
-                    local Tower = require("Tower")
-                    Tower.DemolishTower(currentDetailTower_)
-                    M.HideTowerDetail()
-                    local GameUI = require("GameUI")
-                    GameUI.RefreshUpgradePanel()
-                end,
-            },
+            -- 回收按钮
+            UI.Panel { width = "92%", height = 1, backgroundColor = CLR.divider },
+            demolishContainer,
         },
     }
 
@@ -1067,10 +1087,10 @@ function M.UpdateTowerDetailPosition()
     local sx = screenNorm.x * screenW
     local sy = screenNorm.y * screenH
 
-    local panelW = 240
-    local panelH = 200
+    local panelW = 230
+    local panelH = 280
     local px = sx - panelW * 0.5
-    local py = sy - panelH - 10
+    local py = sy - panelH - 20
 
     px = math.max(4, math.min(screenW - panelW - 4, px))
     py = math.max(4, math.min(screenH - panelH - 4, py))
@@ -1102,28 +1122,29 @@ function M.RefreshTowerDetail()
     local spdMult = math.max(0.30, tower.ratio * #GS.towers) * (tower.artAtkSpdMult or 1.0)
     local fireInt = CONFIG.TowerFireInterval / math.max(0.10, spdMult)
 
-    if detailTitleLabel_ then
-        detailTitleLabel_:SetText(string.format("防御塔 (%d, %d)", tower.gx, tower.gz))
+    -- 能量标签（标题行右侧）
+    if detailEnergyLabel_ then
+        detailEnergyLabel_:SetText(string.format("能量: %.0f%%", tower.ratio * 100))
     end
 
+    -- 属性：伤害 + 攻速（单行）
     if detailStatsLabel_ then
         local dmgBonus = dmg - baseDmg
         local dmgBonusStr = ""
         if math.abs(dmgBonus) > 0.1 then
-            dmgBonusStr = string.format(" (%+.1f)", dmgBonus)
+            dmgBonusStr = string.format("(%+.1f) ", dmgBonus)
         end
         detailStatsLabel_:SetText(string.format(
-            "伤害: %.1f%s\n攻速: %.2f秒\n功率: %.0f%%",
-            dmg, dmgBonusStr, fireInt, tower.ratio * 100
+            "伤害: %.1f %s | 攻速: %.2f秒",
+            dmg, dmgBonusStr, fireInt
         ))
     end
 
-    if detailDemolishLabel_ then
-        local ratio = GS.wavePhase == "preparing" and 0.7 or 0.4
+    -- 回收按钮文字（统一 60%）
+    if detailDemolishBtn_ then
         local origCost = Tower.GetTowerOriginalCost(ti)
-        local refund = math.floor(origCost * ratio + 0.5)
-        local phaseName = GS.wavePhase == "preparing" and "准备阶段" or "战斗阶段"
-        detailDemolishLabel_:SetText(string.format("回收返还: +%d 🪙  (%s %.0f%%)", refund, phaseName, ratio * 100))
+        local refund = math.floor(origCost * 0.6 + 0.5)
+        detailDemolishBtn_:SetText(string.format("回收 +%d 🪙", refund))
     end
 
     -- 三个配件槽
@@ -1474,9 +1495,8 @@ function M.UpdateHintLabel()
                 local dmg = Tower.CalcTowerDamage(tower)
                 local spdMult = math.max(0.30, tower.ratio * #GS.towers) * (tower.artAtkSpdMult or 1.0)
                 local fireInt = CONFIG.TowerFireInterval / spdMult
-                local ratio = GS.wavePhase == "preparing" and 0.7 or 0.4
                 local origCost = Tower.GetTowerOriginalCost(idx)
-                local refund = math.floor(origCost * ratio + 0.5)
+                local refund = math.floor(origCost * 0.6 + 0.5)
                 hintLabel_:SetText(string.format(
                     "防御塔 | 伤害: %.1f | 攻速: %.2fs | [X] 出售: %d金 | 左键: 详情",
                     dmg, fireInt, refund
@@ -1519,7 +1539,7 @@ function M.ShowDropOverlay()
         local dsText = ""
         for _, ds in ipairs(def.downsides) do
             if ds.type == "stat_modifier" then
-                local pct = math.abs(ds.modifier) * 100
+                local pct = math.floor(math.abs(ds.modifier) * 100 + 0.5)
                 local statName = ds.stat == "damage" and "伤害" or
                                  ds.stat == "attack_speed" and "攻速" or ds.stat
                 dsText = dsText .. string.format("-%d%% %s  ", pct, statName)
@@ -1728,7 +1748,7 @@ local function isMouseOverUIPanel()
     if towerDetailVisible_ and towerDetailPanel_ and towerDetailPanel_.props then
         local tp = towerDetailPanel_.props
         if tp.top and tp.top > -9000 and tp.left and tp.left > -9000 then
-            local detailProps = { top = tp.top, left = tp.left, width = 240, height = 360 }
+            local detailProps = { top = tp.top, left = tp.left, width = 230, height = 280 }
             if isMouseInPanel(detailProps, screenW, screenH) then
                 return true
             end
@@ -1777,6 +1797,21 @@ function M.HandleArtifactInput()
     end
 
     if input:GetMouseButtonPress(MOUSEB_LEFT) then
+        -- 优先判断：点击同一座塔 → 关闭面板（放在 isMouseOverUIPanel 之前，防止面板遮住塔时被拦截）
+        if towerDetailVisible_ and GS.hoverOnMap and not GS.hoverValid then
+            local Tower = require("Tower")
+            local idx = Tower.GetTowerAtHover()
+            if idx then
+                if idx == currentDetailTower_ then
+                    M.HideTowerDetail()
+                    return
+                else
+                    M.ShowTowerDetail(idx)
+                    return
+                end
+            end
+        end
+
         if isMouseOverUIPanel() then
             return
         end
@@ -1787,14 +1822,6 @@ function M.HandleArtifactInput()
         end
 
         if towerDetailVisible_ then
-            if GS.hoverOnMap and not GS.hoverValid then
-                local Tower = require("Tower")
-                local idx = Tower.GetTowerAtHover()
-                if idx and idx ~= currentDetailTower_ then
-                    M.ShowTowerDetail(idx)
-                    return
-                end
-            end
             M.HideTowerDetail()
             if upgradePanelVisible_ then M.HideUpgradePanel() end
             return

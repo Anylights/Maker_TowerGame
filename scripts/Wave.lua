@@ -48,6 +48,170 @@ local function GetAffixPool(bigWave)
 end
 
 -- ============================================================================
+-- 大波次出怪方向系统
+-- ============================================================================
+
+-- 当前大波次固定的3个出怪方向角度 (弧度), 整个大波次不变
+local bigWaveAngles_ = {}
+
+-- 上一小波实际使用的活跃方向索引集合 (在 bigWaveAngles_ 中的下标)
+-- 用于保证相邻小波最多变更1个位置
+local prevActiveIndices_ = {}
+
+--- 为新大波次生成3个尽量均匀分布的随机角度
+local function GenerateBigWaveAngles()
+    bigWaveAngles_ = {}
+    prevActiveIndices_ = {}
+    local minSep = math.rad(90)  -- 最小间隔90°，保证分散
+    for attempt = 1, 100 do
+        local angles = {}
+        local ok = true
+        for i = 1, 3 do
+            local a
+            for _ = 1, 30 do
+                a = math.random() * math.pi * 2
+                local valid = true
+                for _, ea in ipairs(angles) do
+                    local diff = math.abs(a - ea)
+                    if diff > math.pi then diff = math.pi * 2 - diff end
+                    if diff < minSep then valid = false; break end
+                end
+                if valid then break end
+            end
+            table.insert(angles, a)
+        end
+        -- 验证3个角度互相满足间隔
+        for i = 1, 3 do
+            for j = i + 1, 3 do
+                local diff = math.abs(angles[i] - angles[j])
+                if diff > math.pi then diff = math.pi * 2 - diff end
+                if diff < minSep then ok = false; break end
+            end
+            if not ok then break end
+        end
+        if ok then
+            bigWaveAngles_ = angles
+            return
+        end
+    end
+    -- 回退: 均匀3等分 + 小随机偏移
+    for i = 1, 3 do
+        bigWaveAngles_[i] = (i - 1) * (math.pi * 2 / 3) + (math.random() - 0.5) * math.rad(30)
+    end
+end
+
+--- 决定本小波次使用几个活跃方向 (1-3, 越到后面越多)
+local function GetActiveCountForSmallWave(smallWave, bigWave)
+    -- 1.1~1.2 用1个, 1.3~1.5 用1-2个, 1.6+ 可以用1-3个
+    -- 整体随着大波次进展，平均活跃数增加
+    local maxActive = math.min(3, 1 + math.floor((smallWave - 1) / 2) + math.floor((bigWave - 1) / 2))
+    maxActive = math.min(3, maxActive)
+    local minActive = math.max(1, maxActive - 1)
+    return math.random(minActive, maxActive)
+end
+
+--- 从3个固定方向中选择本小波次的活跃方向索引集合
+--- 规则: 与上一小波最多变更1个位置 (增加/减少/替换)
+local function PickActiveIndices(smallWave, bigWave)
+    local targetCount = GetActiveCountForSmallWave(smallWave, bigWave)
+    
+    if #prevActiveIndices_ == 0 then
+        -- 首小波: 直接随机选 targetCount 个
+        local all = {1, 2, 3}
+        -- 洗牌
+        for i = 3, 2, -1 do
+            local j = math.random(1, i)
+            all[i], all[j] = all[j], all[i]
+        end
+        local result = {}
+        for i = 1, targetCount do result[i] = all[i] end
+        table.sort(result)
+        return result
+    end
+
+    -- 基于 prevActiveIndices_ 最多变更1个
+    local prev = {}
+    for _, v in ipairs(prevActiveIndices_) do prev[v] = true end
+    local prevList = {}
+    for _, v in ipairs(prevActiveIndices_) do table.insert(prevList, v) end
+
+    local allIndices = {1, 2, 3}
+    local notUsed = {}
+    for _, v in ipairs(allIndices) do
+        if not prev[v] then table.insert(notUsed, v) end
+    end
+
+    -- 决定操作类型
+    local ops = {}
+    -- 如果数量不变: 可以保持 or 替换1个
+    if targetCount == #prevList then
+        table.insert(ops, "keep")
+        if #notUsed > 0 and #prevList > 0 then table.insert(ops, "replace") end
+    elseif targetCount > #prevList then
+        -- 增加1个 (只允许+1)
+        if #notUsed > 0 then table.insert(ops, "add") end
+        -- 或者替换1个 (保持数量)
+        if #notUsed > 0 then table.insert(ops, "replace") end
+    else
+        -- 减少1个 (只允许-1)
+        if #prevList > 1 then table.insert(ops, "remove") end
+        -- 或者替换1个 (保持数量)
+        if #notUsed > 0 then table.insert(ops, "replace") end
+    end
+
+    if #ops == 0 then
+        -- 兜底: 保持
+        local result = {}
+        for _, v in ipairs(prevList) do table.insert(result, v) end
+        table.sort(result)
+        return result
+    end
+
+    local op = ops[math.random(1, #ops)]
+    local result = {}
+
+    if op == "keep" then
+        for _, v in ipairs(prevList) do table.insert(result, v) end
+    elseif op == "add" then
+        for _, v in ipairs(prevList) do table.insert(result, v) end
+        -- 从 notUsed 随机选一个加入
+        local pick = notUsed[math.random(1, #notUsed)]
+        table.insert(result, pick)
+    elseif op == "remove" then
+        -- 随机移除一个
+        local removeIdx = math.random(1, #prevList)
+        for i, v in ipairs(prevList) do
+            if i ~= removeIdx then table.insert(result, v) end
+        end
+    elseif op == "replace" then
+        -- 随机替换一个: 从 prevList 移除一个, 从 notUsed 加入一个
+        local removeIdx = math.random(1, #prevList)
+        local addPick = notUsed[math.random(1, #notUsed)]
+        for i, v in ipairs(prevList) do
+            if i ~= removeIdx then table.insert(result, v) end
+        end
+        table.insert(result, addPick)
+    end
+
+    table.sort(result)
+    return result
+end
+
+--- 获取当前大波次的3个固定方向 (供 Scene.lua 渲染用)
+function M.GetBigWaveAngles()
+    return bigWaveAngles_
+end
+
+--- 获取当前小波次的活跃方向角度列表 (供 Scene.lua 渲染用)
+function M.GetActiveSpawnAngles()
+    local angles = {}
+    for _, idx in ipairs(prevActiveIndices_) do
+        table.insert(angles, bigWaveAngles_[idx])
+    end
+    return angles
+end
+
+-- ============================================================================
 -- HP 缩放公式
 -- ============================================================================
 
@@ -78,59 +242,29 @@ local function GetMaxSpawnPoints(bigWave)
 end
 
 --- 生成本小波次的刷新扇区列表
+--- 基于大波次固定3方向, 每小波选1-3个活跃方向, 相邻小波最多变1个
 --- @return table[] sectors { {angle, enemyId, count, interval, delay, eliteAffixes}, ... }
 local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
     local pool = GetPool(bigWave)
     local affixPool = GetAffixPool(bigWave)
-    local maxPts = GetMaxSpawnPoints(bigWave)
-
-    -- 特殊规则: 第1大波次的1.2之前(即1.1)只允许1个刷新点
-    if bigWave == 1 and smallWave < 2 then
-        maxPts = 1
-    end
 
     local isBossWave = (smallWave == CONFIG.MiniBossSubWave or smallWave == CONFIG.BigBossSubWave)
 
-    -- Boss 波只有 1 个扇区用于 Boss
-    -- 加上 1-2 个普通怪扇区
-    local sectors = {}
-    local usedAngles = {}
-
-    --- 选择一个不与已有角度太近的随机角度
-    local function PickAngle()
-        local minSep = CONFIG.SectorAngleRad * 1.2 -- 最小间隔 > 扇区角度
-        for attempt = 1, 20 do
-            local a = math.random() * math.pi * 2
-            local ok = true
-            for _, ua in ipairs(usedAngles) do
-                local diff = math.abs(a - ua)
-                if diff > math.pi then diff = math.pi * 2 - diff end
-                if diff < minSep then
-                    ok = false
-                    break
-                end
-            end
-            if ok then
-                table.insert(usedAngles, a)
-                return a
-            end
-        end
-        -- 回退: 均匀分布
-        local a = (#usedAngles) * (math.pi * 2 / maxPts) + math.random() * 0.3
-        table.insert(usedAngles, a)
-        return a
-    end
-
     --- 决定普通波怪物数量 (随波次递增)
     local function BaseMonsterCount()
-        -- 基础 5 + 全局波次 * 1.5, 上限约 60
         return math.min(60, math.floor(5 + globalWave * 1.5))
     end
 
+    local sectors = {}
+
     if isBossWave then
-        -- Boss 扇区
+        -- Boss 波: Boss 从一个活跃方向出现, 伴随怪从其他活跃方向出现
+        local activeIndices = PickActiveIndices(smallWave, bigWave)
+        prevActiveIndices_ = activeIndices
+
         local bossId = (smallWave == CONFIG.MiniBossSubWave) and "shatter_titan" or "line_devourer"
-        local bossAngle = PickAngle()
+        -- Boss 使用第1个活跃方向
+        local bossAngle = bigWaveAngles_[activeIndices[1]]
         table.insert(sectors, {
             angle = bossAngle,
             enemyId = bossId,
@@ -141,27 +275,44 @@ local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
             isBoss = true,
         })
 
-        -- 伴随怪: 1-2 个普通扇区
-        local companionPts = math.min(maxPts - 1, math.max(1, math.floor(maxPts * 0.5)))
+        -- 伴随怪从剩余活跃方向出现
         local totalCompanion = math.floor(BaseMonsterCount() * 0.6)
-        local perSector = math.max(3, math.floor(totalCompanion / companionPts))
-        for ci = 1, companionPts do
+        local companionDirs = #activeIndices - 1
+        if companionDirs < 1 then companionDirs = 1; end -- 至少1个方向
+
+        -- 如果只有1个活跃方向，伴随怪也从同一方向出
+        if #activeIndices == 1 then
             local eid = pool[math.random(1, #pool)]
             table.insert(sectors, {
-                angle = PickAngle(),
+                angle = bossAngle + math.rad(20),  -- 稍微偏一点
                 enemyId = eid,
-                count = perSector,
+                count = totalCompanion,
                 interval = math.max(0.3, 1.5 - globalWave * 0.02),
-                delay = 3.0 + ci * 2.0,
+                delay = 3.0,
                 eliteAffixes = {},
                 isBoss = false,
             })
+        else
+            local perDir = math.max(3, math.floor(totalCompanion / companionDirs))
+            for ci = 2, #activeIndices do
+                local eid = pool[math.random(1, #pool)]
+                table.insert(sectors, {
+                    angle = bigWaveAngles_[activeIndices[ci]],
+                    enemyId = eid,
+                    count = perDir,
+                    interval = math.max(0.3, 1.5 - globalWave * 0.02),
+                    delay = 3.0 + (ci - 2) * 2.0,
+                    eliteAffixes = {},
+                    isBoss = false,
+                })
+            end
         end
     else
-        -- 普通波: 随机分配多个扇区
-        local numSectors = math.max(1, math.min(maxPts, math.random(
-            math.ceil(maxPts * 0.5), maxPts
-        )))
+        -- 普通波: 从活跃方向出怪
+        local activeIndices = PickActiveIndices(smallWave, bigWave)
+        prevActiveIndices_ = activeIndices
+
+        local numSectors = #activeIndices
         local totalMonsters = BaseMonsterCount()
         local remaining = totalMonsters
 
@@ -169,7 +320,7 @@ local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
             local eid = pool[math.random(1, #pool)]
             local count
             if si == numSectors then
-                count = remaining
+                count = math.max(1, remaining)
             else
                 count = math.max(2, math.floor(remaining / (numSectors - si + 1) + math.random(-2, 2)))
                 count = math.min(count, remaining - (numSectors - si))
@@ -181,7 +332,6 @@ local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
             if #affixPool > 0 and smallWave >= 3 then
                 local eliteChance = 0.05 + (bigWave - 1) * 0.03 + (smallWave - 1) * 0.02
                 if math.random() < eliteChance then
-                    -- 1-2 个词缀
                     local numAffixes = (bigWave >= 4 and math.random() < 0.3) and 2 or 1
                     local shuffled = {}
                     for _, a in ipairs(affixPool) do table.insert(shuffled, a) end
@@ -196,7 +346,7 @@ local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
             end
 
             table.insert(sectors, {
-                angle = PickAngle(),
+                angle = bigWaveAngles_[activeIndices[si]],
                 enemyId = eid,
                 count = count,
                 interval = math.max(0.3, 1.5 - globalWave * 0.015),
@@ -449,6 +599,7 @@ end
 --- 开始新一波
 function M.StartWave()
     -- 推进波次编号
+    local prevBigWave = GS.bigWave
     GS.smallWave = GS.smallWave + 1
     if GS.smallWave > CONFIG.BigWaveSize then
         GS.smallWave = 1
@@ -458,6 +609,21 @@ function M.StartWave()
 
     GS.globalWave = (GS.bigWave - 1) * CONFIG.BigWaveSize + GS.smallWave
     GS.currentWave = GS.globalWave -- 向后兼容
+
+    -- 新大波次: 重新生成3个固定出怪方向
+    local isNewBigWave = (GS.bigWave ~= prevBigWave or GS.globalWave == 1)
+    if isNewBigWave then
+        GenerateBigWaveAngles()
+        print(string.format("[Wave] BigWave %d: New spawn angles: %.0f° %.0f° %.0f°",
+            GS.bigWave,
+            math.deg(bigWaveAngles_[1]),
+            math.deg(bigWaveAngles_[2]),
+            math.deg(bigWaveAngles_[3])
+        ))
+        -- 通知 Scene 重建弧段节点
+        local Scene = require("Scene")
+        Scene.RebuildSpawnArcs(bigWaveAngles_)
+    end
 
     -- 准备时间
     local isBossWave = (GS.smallWave == CONFIG.MiniBossSubWave or GS.smallWave == CONFIG.BigBossSubWave)
@@ -473,8 +639,14 @@ function M.StartWave()
     GS.waveTimer = currentPrepTime_
     indicatorTime_ = 0  -- 重置动画计时
 
-    -- 生成刷新扇区
+    -- 生成刷新扇区 (同时更新 prevActiveIndices_)
     GS.spawnSectors = GenerateSpawnSectors(GS.bigWave, GS.smallWave, GS.globalWave)
+
+    -- 通知 Scene 更新活跃弧段高亮 (本小波活跃方向标红)
+    do
+        local Scene = require("Scene")
+        Scene.UpdateSpawnArcActive(M.GetActiveSpawnAngles())
+    end
 
     -- 构建活跃 spawn groups (从扇区生成)
     activeGroups_ = {}
@@ -549,6 +721,10 @@ function M.Update(dt)
 
     -- 指示器动画 (所有阶段都执行)
     UpdateIndicatorAnimation(dt)
+
+    -- 出怪弧段动画 (所有阶段都执行)
+    local Scene = require("Scene")
+    Scene.UpdateSpawnArcs(dt)
 
     -- === 准备阶段 ===
     if GS.wavePhase == "preparing" then
@@ -652,7 +828,8 @@ function M.Update(dt)
                 GS.wavePhase = "dropping"
                 print("[Wave] Entering artifact drop selection...")
             else
-                M.StartWave()
+                GS.wavePhase = "waiting"
+                print("[Wave] Waiting for player to press SPACE...")
             end
         end
         return
@@ -661,6 +838,15 @@ function M.Update(dt)
     -- === 圣器掉落选择阶段 ===
     if GS.wavePhase == "dropping" then
         if not GS.artifactDropPending then
+            GS.wavePhase = "waiting"
+            print("[Wave] Artifact done, waiting for player to press SPACE...")
+        end
+        return
+    end
+
+    -- === 等待阶段：无限期暂停，玩家按空格继续 ===
+    if GS.wavePhase == "waiting" then
+        if input:GetKeyPress(KEY_SPACE) then
             M.StartWave()
         end
         return
@@ -737,6 +923,8 @@ function M.GetWaveInfo()
     elseif phase == "clearing" then
         return string.format("Wave %s | 清剿中 (剩余 %d)",
             waveLabel, #GS.monsters)
+    elseif phase == "waiting" then
+        return string.format("Wave %s 已完成 | 按空格开始下一波", waveLabel)
     else
         return string.format("Wave %s", waveLabel)
     end

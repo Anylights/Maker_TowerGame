@@ -135,10 +135,10 @@ M.CONFIG = {
     PrepTimeFirst = 30,            -- 首波准备时间(秒)
 
     -- === HP 缩放 (抛物线: 1 + A*sqrt(w-1) + B*(w-1)) ===
-    HPScaleA = 1.8,
-    HPScaleB = 0.12,
-    BossHPScaleA = 1.2,            -- Boss 用更缓和的缩放
-    BossHPScaleB = 0.08,
+    HPScaleA = 0.4,
+    HPScaleB = 0.06,
+    BossHPScaleA = 0.3,            -- Boss 用更缓和的缩放
+    BossHPScaleB = 0.04,
 
     -- === 径向刷新 ===
     SpawnDistanceFactor = 2.0,     -- 刷新距离 = EnergyRange * 2 * 此值

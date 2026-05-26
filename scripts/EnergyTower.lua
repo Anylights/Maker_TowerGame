@@ -424,6 +424,9 @@ function M.PlaceEnergyTower()
     etLabel:SetEffectColor(Color(0.0, 0.05, 0.2, 0.9))
     etLabel.fixedScreenSize = true
     GS.etEnergyLabel = etLabel
+
+    -- 保存塔根节点引用（用于布线模式透明切换）
+    GS.etNode = node
 end
 
 -- ============================================================================
@@ -668,7 +671,14 @@ function M.BuildSpanningTree()
         return  -- 源节点不在图中 (没有任何线)
     end
 
-    -- BFS
+    -- 快速查找：节点键 → 是否是基础塔（非能源塔）
+    local Tower = require("Tower")
+    local isTowerNode = {}
+    for _, t in ipairs(GS.towers) do
+        isTowerNode[NodeKey(t.gx, t.gz)] = true
+    end
+
+    -- BFS（遇到基础塔节点时将其加入树，但不再向外展开——避免能量穿越基础塔）
     local visited = {}
     local queue = { sourceKey }
     visited[sourceKey] = true
@@ -679,25 +689,71 @@ function M.BuildSpanningTree()
         local curKey = queue[head]
         head = head + 1
 
-        local curNode = graph.nodes[curKey]
-        if curNode then
-            for _, eKey in ipairs(curNode.edges) do
-                local edge = graph.edges[eKey]
-                if edge then
-                    -- 找到邻居节点
-                    local nk1 = NodeKey(edge.x1, edge.z1)
-                    local nk2 = NodeKey(edge.x2, edge.z2)
-                    local neighborKey = (nk1 == curKey) and nk2 or nk1
+        -- 如果当前节点是基础塔（非能源塔），停止向外展开
+        -- 能量在此终止，不允许穿越基础塔继续传递
+        if isTowerNode[curKey] then
+            goto continue_bfs
+        end
 
-                    if not visited[neighborKey] then
-                        visited[neighborKey] = true
-                        net.spanTree[neighborKey] = { parentKey = curKey, childKeys = {} }
-                        table.insert(net.spanTree[curKey].childKeys, neighborKey)
-                        table.insert(queue, neighborKey)
+        do
+            local curNode = graph.nodes[curKey]
+            if curNode then
+                for _, eKey in ipairs(curNode.edges) do
+                    local edge = graph.edges[eKey]
+                    if edge then
+                        -- 找到邻居节点
+                        local nk1 = NodeKey(edge.x1, edge.z1)
+                        local nk2 = NodeKey(edge.x2, edge.z2)
+                        local neighborKey = (nk1 == curKey) and nk2 or nk1
+
+                        if not visited[neighborKey] then
+                            visited[neighborKey] = true
+                            net.spanTree[neighborKey] = { parentKey = curKey, childKeys = {} }
+                            table.insert(net.spanTree[curKey].childKeys, neighborKey)
+                            table.insert(queue, neighborKey)
+                        end
                     end
                 end
             end
         end
+
+        ::continue_bfs::
+    end
+
+    -- ----------------------------------------------------------------
+    -- 后处理：标记每个子树节点是否"有效"（路径末端能到达基础塔）
+    -- 规则：
+    --   • 基础塔节点本身 → 有效
+    --   • 非基础塔节点 → 只要其子节点中至少有一个有效，则自身有效
+    -- 无效的节点（死路分叉，不以基础塔结尾）不参与功率传播。
+    -- ----------------------------------------------------------------
+    net.validNodes = {}
+
+    -- 自底向上（从叶节点往上）计算有效性
+    -- 用逆 BFS 顺序（queue 的逆序已是自底向上）
+    for i = #queue, 1, -1 do
+        local nk = queue[i]
+        if isTowerNode[nk] then
+            -- 基础塔：有效
+            net.validNodes[nk] = true
+        else
+            -- 非基础塔：检查子节点
+            local treeNode = net.spanTree[nk]
+            if treeNode then
+                for _, childKey in ipairs(treeNode.childKeys) do
+                    if net.validNodes[childKey] then
+                        net.validNodes[nk] = true
+                        break
+                    end
+                end
+            end
+        end
+    end
+    -- 能源塔本身（根节点）有效性取决于子节点
+    if not net.validNodes[sourceKey] then
+        -- 如果根节点没有任何有效子树，整个图无有效路径
+        -- 保持 validNodes[sourceKey] = nil（无效）
+        -- PropagatePower 会处理这个情况
     end
 end
 
@@ -735,7 +791,10 @@ function M.PropagatePower()
     end
 
     -- 自上而下 BFS 传播
+    -- 只向"有效子节点"（路径最终到达基础塔的分支）传播，无效的死路分叉不获得能量
     net.nodePower[sourceKey] = totalPower
+
+    local validNodes = net.validNodes or {}
 
     local queue = { sourceKey }
     local head = 1
@@ -746,15 +805,22 @@ function M.PropagatePower()
         local treeNode = net.spanTree[curKey]
         if treeNode then
             local curPower = net.nodePower[curKey] or 0
-            local numChildren = #treeNode.childKeys
 
-            if numChildren > 0 then
+            -- 只统计有效子节点参与均分（无效分叉不分走能量）
+            local validChildren = {}
+            for _, childKey in ipairs(treeNode.childKeys) do
+                if validNodes[childKey] then
+                    table.insert(validChildren, childKey)
+                end
+            end
+
+            local numValid = #validChildren
+            if numValid > 0 then
                 -- 先均分，再扣除每段线的衰减消耗
-                -- 公式: child能量 = (当前节点能量 ÷ 子节点数) - PowerDrainPerSegment
-                local sharedPower = curPower / numChildren
+                local sharedPower = curPower / numValid
                 local childPower = math.max(0, sharedPower - CONFIG.PowerDrainPerSegment)
 
-                for _, childKey in ipairs(treeNode.childKeys) do
+                for _, childKey in ipairs(validChildren) do
                     net.nodePower[childKey] = childPower
 
                     -- 记录边上的功率（用于能源线视觉亮度等）
@@ -1284,7 +1350,64 @@ function M.ToggleWiringMode()
     -- 切换布线模式时取消待确认的建塔加号
     local Tower = require("Tower")
     Tower.CancelPlacement()
+
+    -- 能源塔透明度切换：布线模式 → 30% 不透明，正常模式 → 100%
+    M.SetEnergyTowerOpacity(GS.wiringMode and 0.05 or 1.0)
+
     print("[Wiring] Mode: " .. (GS.wiringMode and "ON" or "OFF"))
+end
+
+--- 能源塔原始材质缓存 { [nodeUserdata] = { [geomIdx] = origMat } }
+local etOrigMats_ = nil
+
+--- 设置能源塔模型整体透明度 (0.0~1.0)
+--- 使用 clone+cache 策略：半透明时克隆材质并切换 technique；
+--- 恢复时换回原始材质，不调用未绑定的 GetShaderParameter。
+function M.SetEnergyTowerOpacity(alpha)
+    if not GS.etNode then return end
+
+    local useAlpha = (alpha < 0.999)
+    local techOpaque = "Techniques/PBR/PBRNoTexture.xml"
+    local techAlpha  = "Techniques/PBR/PBRNoTextureAlpha.xml"
+
+    local function ApplyToNode(n)
+        local model = n:GetComponent("StaticModel")
+        if model then
+            if useAlpha then
+                -- 首次调用时保存原始材质
+                if not etOrigMats_ then etOrigMats_ = {} end
+                if not etOrigMats_[n] then
+                    etOrigMats_[n] = {}
+                    for mi = 0, model:GetNumGeometries() - 1 do
+                        etOrigMats_[n][mi] = model:GetMaterial(mi)
+                    end
+                end
+                -- 克隆材质并切换为半透明 technique
+                for mi = 0, model:GetNumGeometries() - 1 do
+                    local orig = etOrigMats_[n][mi]
+                    if orig then
+                        local cloned = orig:Clone()
+                        local tech = cache:GetResource("Technique", techAlpha)
+                        if tech then cloned:SetTechnique(0, tech) end
+                        cloned:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 1.0, 1.0, alpha)))
+                        model:SetMaterial(mi, cloned)
+                    end
+                end
+            else
+                -- 恢复原始材质
+                if etOrigMats_ and etOrigMats_[n] then
+                    for mi, orig in pairs(etOrigMats_[n]) do
+                        model:SetMaterial(mi, orig)
+                    end
+                end
+            end
+        end
+        for i = 0, n:GetNumChildren() - 1 do
+            ApplyToNode(n:GetChild(i))
+        end
+    end
+
+    ApplyToNode(GS.etNode)
 end
 
 -- ============================================================================
