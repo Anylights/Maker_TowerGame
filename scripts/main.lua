@@ -49,10 +49,6 @@ function Start()
     -- 圣器系统
     Artifact.Init()
 
-    -- 开发模式：预填充所有圣器 (上线前移除)
-    GS.devSkipWaveDrop = true
-    Artifact.FillDevInventory()
-
     -- Phase 1 圣器逻辑验收测试 (开发期，上线前移除)
     local ok, TestArtifacts = pcall(require, "TestArtifacts")
     if ok and TestArtifacts then
@@ -70,6 +66,11 @@ function Start()
     if ok3 and TestPhase3 then
         TestPhase3.RunPhase3()
     end
+
+    -- 开发模式：测试跑完后预填充所有圣器（上线前移除）
+    GS.devSkipWaveDrop = true
+    Artifact.Init()           -- 重新初始化，清除测试残留
+    Artifact.FillDevInventory()
 
     -- 悬停指示器 & 放置确认标记
     Scene.CreateHoverIndicator()
