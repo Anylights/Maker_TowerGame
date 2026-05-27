@@ -1596,6 +1596,73 @@ BULLET_VFX["feedback_coil"] = {
 }
 
 -- ============================================================================
+-- 弹道 Sprite Sheet 配置（附加到子弹节点，循环播放至子弹销毁）
+-- size 比命中特效小很多（0.25-0.5m），避免遮挡子弹本体
+-- ============================================================================
+local BULLET_SHEET_VFX = {}
+
+BULLET_SHEET_VFX["rapid_fire_module"] = {
+    file="ParticleFX1/Sparks-Sheet.png", cols=3, rows=3, totalFrames=9,
+    fps=24, size=0.30,
+}
+BULLET_SHEET_VFX["fire_seed"] = {
+    file="ParticleFX1/Fire 1-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=24, size=0.40,
+}
+BULLET_SHEET_VFX["ice_crystal"] = {
+    file="ParticleFX1/Blue Vortex-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=20, size=0.38,
+}
+BULLET_SHEET_VFX["corrosion"] = {
+    file="ParticleFX1/Poison Cloud-Sheet.png", cols=4, rows=5, totalFrames=20,
+    fps=18, size=0.35,
+}
+BULLET_SHEET_VFX["thunder"] = {
+    file="ParticleFX1/Eletric A-Sheet.png", cols=3, rows=3, totalFrames=9,
+    fps=24, size=0.42,
+}
+BULLET_SHEET_VFX["splinter"] = {
+    file="ParticleFX1/Spark3-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=28, size=0.30,
+}
+BULLET_SHEET_VFX["piercing_core"] = {
+    file="ParticleFX1/Sparky Flame-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=22, size=0.35,
+}
+BULLET_SHEET_VFX["sniper_mod"] = {
+    file="ParticleFX1/Spark2-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=28, size=0.28,
+}
+BULLET_SHEET_VFX["high_explosive"] = {
+    file="ParticleFX1/Fire2-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=22, size=0.50,
+}
+BULLET_SHEET_VFX["crit_device"] = {
+    file="ParticleFX1/Spark4-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=28, size=0.32,
+}
+BULLET_SHEET_VFX["elemental_core"] = {
+    file="ParticleFX1/Blue Vortex 2-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=22, size=0.40,
+}
+BULLET_SHEET_VFX["overload_relay"] = {
+    file="ParticleFX1/Eletric B-Sheet.png", cols=3, rows=3, totalFrames=9,
+    fps=24, size=0.42,
+}
+BULLET_SHEET_VFX["energy_ammo"] = {
+    file="ParticleFX1/Fire 3-Sheet.png", cols=4, rows=3, totalFrames=12,
+    fps=22, size=0.38,
+}
+BULLET_SHEET_VFX["charged_hit"] = {
+    file="ParticleFX1/Sparky Flame-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=22, size=0.40,
+}
+BULLET_SHEET_VFX["feedback_coil"] = {
+    file="ParticleFX1/Spark1-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=28, size=0.30,
+}
+
+-- ============================================================================
 -- 命中爆炸 VFX 配置（一次性爆发，TTL 到期后删节点）
 -- ============================================================================
 local HIT_VFX = {}
@@ -1755,28 +1822,233 @@ HIT_VFX["feedback_coil"] = {
     },
 }
 
--- 命中特效待清理队列: { {node=Node, ttl=number}, ... }
+-- ============================================================================
+-- Sprite Sheet 命中动画配置
+-- 每帧修改 BillboardSet 的 UV 坐标来播放帧动画（替代粒子爆炸）
+-- 字段: file=贴图相对路径, cols=列数, rows=行数, totalFrames=总帧数(可<cols*rows),
+--       fps=帧率, size=世界空间大小(米), ttl=存活时间(自动=totalFrames/fps+buffer)
+-- ============================================================================
+local SHEET_VFX = {}
+
+-- 快速火花（rapid_fire_module）: Sparks-Sheet 3x3=9帧
+SHEET_VFX["rapid_fire_module"] = {
+    file="ParticleFX1/Sparks-Sheet.png", cols=3, rows=3, totalFrames=9,
+    fps=18, size=1.2,
+}
+-- 火焰命中（fire_seed）: Fire 1-Sheet 5x3=15帧
+SHEET_VFX["fire_seed"] = {
+    file="ParticleFX1/Fire 1-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=20, size=1.6,
+}
+-- 冰晶命中（ice_crystal）: Splash-Sheet 3x3=9帧（模拟冰碎溅射）
+SHEET_VFX["ice_crystal"] = {
+    file="ParticleFX1/Splash-Sheet.png", cols=3, rows=3, totalFrames=9,
+    fps=16, size=1.4,
+}
+-- 腐蚀命中（corrosion）: Poison Cloud-Sheet 4x5=20帧
+SHEET_VFX["corrosion"] = {
+    file="ParticleFX1/Poison Cloud-Sheet.png", cols=4, rows=5, totalFrames=20,
+    fps=18, size=1.5,
+}
+-- 雷电命中（thunder）: Eletric A-Sheet 3x3=9帧
+SHEET_VFX["thunder"] = {
+    file="ParticleFX1/Eletric A-Sheet.png", cols=3, rows=3, totalFrames=9,
+    fps=18, size=1.8,
+}
+-- 碎片命中（splinter）: Spark1-Sheet 5x6=30帧
+SHEET_VFX["splinter"] = {
+    file="ParticleFX1/Spark1-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=24, size=1.2,
+}
+-- 穿甲命中（piercing_core）: Splatter-Sheet 5x6=30帧
+SHEET_VFX["piercing_core"] = {
+    file="ParticleFX1/Splatter-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=24, size=1.3,
+}
+-- 狙击命中（sniper_mod）: Spark2-Sheet 5x6=30帧（大爆炸）
+SHEET_VFX["sniper_mod"] = {
+    file="ParticleFX1/Spark2-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=20, size=2.0,
+}
+-- 高爆命中（high_explosive）: Fire2-Sheet 5x3=15帧
+SHEET_VFX["high_explosive"] = {
+    file="ParticleFX1/Fire2-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=20, size=2.2,
+}
+-- 暴击命中（crit_device）: Sparky Flame-Sheet 5x3=15帧
+SHEET_VFX["crit_device"] = {
+    file="ParticleFX1/Sparky Flame-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=18, size=1.4,
+}
+-- 元素命中（elemental_core）: Blue Vortex-Sheet 5x3=15帧
+SHEET_VFX["elemental_core"] = {
+    file="ParticleFX1/Blue Vortex-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=18, size=1.6,
+}
+-- 过载命中（overload_relay）: Eletric B-Sheet 3x3=9帧
+SHEET_VFX["overload_relay"] = {
+    file="ParticleFX1/Eletric B-Sheet.png", cols=3, rows=3, totalFrames=9,
+    fps=18, size=1.8,
+}
+-- 能量弹药（energy_ammo）: Fire 3-Sheet 4x3=12帧
+SHEET_VFX["energy_ammo"] = {
+    file="ParticleFX1/Fire 3-Sheet.png", cols=4, rows=3, totalFrames=12,
+    fps=18, size=1.4,
+}
+-- 充能命中（charged_hit）: Blue Vortex 2-Sheet 5x3=15帧
+SHEET_VFX["charged_hit"] = {
+    file="ParticleFX1/Blue Vortex 2-Sheet.png", cols=5, rows=3, totalFrames=15,
+    fps=18, size=1.6,
+}
+-- 反馈线圈（feedback_coil）: Spark4-Sheet 5x6=30帧
+SHEET_VFX["feedback_coil"] = {
+    file="ParticleFX1/Spark4-Sheet.png", cols=5, rows=6, totalFrames=30,
+    fps=24, size=1.2,
+}
+
+-- ============================================================================
+-- 内部: 在世界坐标生成 Sprite Sheet Billboard 动画（面向相机，一次性播放）
+-- ============================================================================
+local function CreateSheetBillboard(scene, pos, cfg)
+    local node = scene:CreateChild("SheetHitVFX")
+    -- 命中位置稍微往上偏移，避免陷入地面/敌人底部
+    node.position = Vector3(pos.x, pos.y + 0.4, pos.z)
+
+    local bs = node:CreateComponent("BillboardSet")
+    bs:SetNumBillboards(1)
+    bs.faceCameraMode = FC_ROTATE_XYZ
+
+    -- 加法混合（DiffAdd）：黑色像素贡献为零（等同透明），彩色叠加发光
+    -- 所有 Sheet 文件均为黑底设计，必须用加法混合才可见
+    local mat = Material:new()
+    local tech = cache:GetResource("Technique", "Techniques/DiffAdd.xml")
+    if not tech then
+        tech = cache:GetResource("Technique", "Techniques/DiffUnlit.xml")
+    end
+    mat:SetTechnique(0, tech)
+    local tex = cache:GetResource("Texture2D", cfg.file)
+    if tex then
+        mat:SetTexture(TU_DIFFUSE, tex)
+    end
+    mat:SetShaderParameter("MatDiffColor", Variant(Color(1, 1, 1, 1)))
+    bs:SetMaterial(mat)
+
+    -- 初始化第 0 帧（尺寸放大 1.8 倍，保证在塔防俯视角可见）
+    local bbd    = bs:GetBillboard(0)
+    local sz     = (cfg.size or 1.5) * 1.8
+    bbd.size     = Vector2(sz, sz)
+    local fw     = 1.0 / cfg.cols
+    local fh     = 1.0 / cfg.rows
+    bbd.uv       = Rect(0, 0, fw, fh)
+    bbd.color    = Color(1, 1, 1, 1)
+    bbd.enabled  = true
+    bs:Commit()
+
+    local ttl = (cfg.totalFrames / cfg.fps) + 0.08
+    return { type="sheet", node=node, bs=bs, timer=0,
+             fps=cfg.fps, cols=cfg.cols, rows=cfg.rows,
+             totalFrames=cfg.totalFrames, ttl=ttl }
+end
+
+-- ============================================================================
+-- 内部: 在子弹节点上创建循环播放的 Sprite Sheet Billboard（随子弹移动）
+-- ============================================================================
+local function CreateBulletSheetBillboard(projNode, cfg)
+    local node = projNode:CreateChild("BulletSheetVFX")
+
+    local bs = node:CreateComponent("BillboardSet")
+    bs:SetNumBillboards(1)
+    bs.faceCameraMode = FC_ROTATE_XYZ
+
+    -- 加法混合：黑底 sheet 必须用 DiffAdd，黑色像素贡献为零
+    local mat = Material:new()
+    local tech = cache:GetResource("Technique", "Techniques/DiffAdd.xml")
+    if not tech then
+        tech = cache:GetResource("Technique", "Techniques/DiffUnlit.xml")
+    end
+    mat:SetTechnique(0, tech)
+    local tex = cache:GetResource("Texture2D", cfg.file)
+    if tex then
+        mat:SetTexture(TU_DIFFUSE, tex)
+    end
+    mat:SetShaderParameter("MatDiffColor", Variant(Color(1, 1, 1, 1)))
+    bs:SetMaterial(mat)
+
+    local bbd = bs:GetBillboard(0)
+    local sz  = (cfg.size or 0.4) * 1.8  -- 放大 1.8 倍增强可见性
+    bbd.size  = Vector2(sz, sz)
+    local fw  = 1.0 / cfg.cols
+    local fh  = 1.0 / cfg.rows
+    bbd.uv    = Rect(0, 0, fw, fh)
+    bbd.color = Color(1, 1, 1, 1)
+    bbd.enabled = true
+    bs:Commit()
+
+    -- 返回追踪条目（projNode 是父节点，随子弹销毁自动消失）
+    return { projNode=projNode, bs=bs, timer=0,
+             fps=cfg.fps, cols=cfg.cols, rows=cfg.rows, totalFrames=cfg.totalFrames }
+end
+
+-- 子弹 Sheet 动画追踪列表（节点销毁后在 Update 中自动清除）
+local activeBulletSheets = {}
+
+-- 命中特效待清理队列:
+--   粒子型: { type="particle", node=Node, ttl=number }
+--   Sheet型: { type="sheet", node=Node, bs=BillboardSet, timer=number,
+--              fps=number, cols=number, rows=number, totalFrames=number, ttl=number }
 local pendingRemovals = {}
 
---- 在飞行子弹上附加拖尾特效（子弹销毁时自动随节点消失）
+--- 在飞行子弹上附加弹道特效（随子弹节点移动，子弹销毁时自动消失）
+--- 优先使用 Sprite Sheet Billboard（BULLET_SHEET_VFX），无则回退到粒子拖尾（BULLET_VFX）
 --- @param projNode Node
 --- @param artifactId string
 function M.SpawnBulletVFX(projNode, artifactId)
+    if not projNode then return end
+
+    -- 优先: Sprite Sheet 循环帧动画
+    local sheetCfg = BULLET_SHEET_VFX[artifactId]
+    if sheetCfg then
+        local ok, entry = pcall(CreateBulletSheetBillboard, projNode, sheetCfg)
+        if ok and entry then
+            table.insert(activeBulletSheets, entry)
+        else
+            print(string.format("[ArtifactVFX] SpawnBulletSheet error (%s): %s", artifactId, tostring(entry)))
+        end
+        return
+    end
+
+    -- 回退: 粒子拖尾
     local cfg = BULLET_VFX[artifactId]
-    if not cfg or not projNode then return end
+    if not cfg then return end
     local ok, err = pcall(CreateParticleNode, projNode, cfg)
     if not ok then
         print(string.format("[ArtifactVFX] SpawnBulletVFX error (%s): %s", artifactId, tostring(err)))
     end
 end
 
---- 在命中位置生成一次性爆发特效（TTL 后自动删除节点）
+--- 在命中位置生成一次性爆发特效
+--- 优先使用 Sprite Sheet 帧动画（SHEET_VFX），无则回退到粒子爆炸（HIT_VFX）
 --- @param scene Scene
 --- @param hitPos Vector3
 --- @param artifactId string
 function M.SpawnHitVFX(scene, hitPos, artifactId)
+    if not scene or not hitPos then return end
+
+    -- 优先: Sprite Sheet Billboard 帧动画
+    local sheetCfg = SHEET_VFX[artifactId]
+    if sheetCfg then
+        local ok, result = pcall(CreateSheetBillboard, scene, hitPos, sheetCfg)
+        if ok and result then
+            table.insert(pendingRemovals, result)
+        else
+            print(string.format("[ArtifactVFX] SpawnSheetHit error (%s): %s", artifactId, tostring(result)))
+        end
+        return  -- 有 sheet 就不再生成粒子
+    end
+
+    -- 回退: 粒子爆炸
     local cfg = HIT_VFX[artifactId]
-    if not cfg or not scene then return end
+    if not cfg then return end
     local ok, err = pcall(function()
         local node = scene:CreateChild("HitVFX_" .. artifactId)
         node.position = hitPos
@@ -1784,8 +2056,7 @@ function M.SpawnHitVFX(scene, hitPos, artifactId)
         for k, v in pairs(cfg) do oneShotCfg[k] = v end
         oneShotCfg.emitting = true
         CreateParticleNode(node, oneShotCfg)
-        -- 停止继续发射（让现有粒子淡出）—— 延迟到下一帧通过 pendingRemovals 处理
-        table.insert(pendingRemovals, { node = node, ttl = cfg.ttl or 0.8 })
+        table.insert(pendingRemovals, { type="particle", node = node, ttl = cfg.ttl or 0.8 })
     end)
     if not ok then
         print(string.format("[ArtifactVFX] SpawnHitVFX error (%s): %s", artifactId, tostring(err)))
@@ -1806,16 +2077,59 @@ function M.Update(dt)
             end
         end
     end
-    -- 清理已超时的命中特效节点
+    -- 更新子弹 Sheet 帧动画（循环播放，节点销毁后自动清除）
+    local j = 1
+    while j <= #activeBulletSheets do
+        local e   = activeBulletSheets[j]
+        local ok  = pcall(function()
+            -- 尝试访问节点以检测是否已销毁
+            local _ = e.projNode.scene
+        end)
+        if not ok or not e.projNode.scene then
+            -- 子弹节点已被销毁，清除追踪条目
+            table.remove(activeBulletSheets, j)
+        else
+            e.timer = e.timer + dt
+            local frame = math.floor(e.timer * e.fps) % e.totalFrames
+            local col   = frame % e.cols
+            local row   = math.floor(frame / e.cols)
+            local fw    = 1.0 / e.cols
+            local fh    = 1.0 / e.rows
+            local bbd   = e.bs:GetBillboard(0)
+            bbd.uv      = Rect(col * fw, row * fh, (col + 1) * fw, (row + 1) * fh)
+            e.bs:Commit()
+            j = j + 1
+        end
+    end
+
+    -- 更新/清理命中特效节点
     local i = 1
     while i <= #pendingRemovals do
         local entry = pendingRemovals[i]
         entry.ttl = entry.ttl - dt
+
+        if entry.type == "sheet" then
+            -- Sprite Sheet 帧动画：每帧更新 UV 坐标
+            entry.timer = entry.timer + dt
+            local frame = math.floor(entry.timer * entry.fps)
+            if frame < entry.totalFrames then
+                -- 计算当前帧的 UV Rect（UV 坐标 0-1 空间）
+                local col  = frame % entry.cols
+                local row  = math.floor(frame / entry.cols)
+                local fw   = 1.0 / entry.cols
+                local fh   = 1.0 / entry.rows
+                local bbd  = entry.bs:GetBillboard(0)
+                bbd.uv     = Rect(col * fw, row * fh, (col + 1) * fw, (row + 1) * fh)
+                entry.bs:Commit()
+            end
+        end
+
         if entry.ttl <= 0 then
             if entry.node then
-                -- 先停止发射，让粒子自然淡出后再移除
-                local em = entry.node:GetComponent("ParticleEmitter")
-                if em then em:SetEmitting(false) end
+                if entry.type == "particle" then
+                    local em = entry.node:GetComponent("ParticleEmitter")
+                    if em then em:SetEmitting(false) end
+                end
                 entry.node:Remove()
             end
             table.remove(pendingRemovals, i)
