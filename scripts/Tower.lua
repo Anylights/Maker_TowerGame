@@ -55,11 +55,25 @@ local WEAPON_MODELS = {
 function M.CalcTowerDamage(tower)
     -- 基础伤 = 获得能量 × 基础倍率
     local dmg = (tower.delivered or 0) * CONFIG.TowerDmgRate
-    -- 乘法项：圣器倍率
+    -- 圣器伤害倍率
     dmg = dmg * (tower.artDmgMult or 1.0)
-    -- 加法项：圣器固伤（占位，待配件系统实现）
+    -- 光环伤害加成（加法叠加）
+    dmg = dmg * (1.0 + (tower.auraDmgBonus or 0))
+    -- 固定加伤
     dmg = dmg + (tower.artFlatDmg or 0)
     return math.max(0, dmg)
+end
+
+--- 计算塔的有效射程（含圣器 + 光环修正）
+--- @param tower table 塔对象
+--- @return number 有效射程（格）
+function M.GetTowerEffectiveRange(tower)
+    local base = CONFIG.TowerRange
+    -- 百分比射程（sniper_mod +150% → artRangeMult = 1.5 → base * 2.5）
+    base = base * (1.0 + (tower.artRangeMult or 0))
+    -- 固定格数（自身圣器 + 光环）
+    base = base + (tower.artRangeFlat or 0) + (tower.auraRangeFlatBonus or 0)
+    return math.max(1.0, base)
 end
 
 -- ============================================================================
@@ -282,15 +296,16 @@ function M.UpdateTowerAttacks(dt)
             end
         end
 
-        -- 寻找最近怪物
+        -- 寻找最近怪物（使用有效射程）
+        local effectiveRange = M.GetTowerEffectiveRange(tower)
         local bestM = nil
-        local bestDist = CONFIG.TowerRange + 1
+        local bestDist = effectiveRange + 1
         for _, m in ipairs(GS.monsters) do
             if m.node and m.hp > 0 then
                 local dx = m.node.position.x - tower.gx
                 local dz = m.node.position.z - tower.gz
                 local d = math.sqrt(dx * dx + dz * dz)
-                if d <= CONFIG.TowerRange and d < bestDist then
+                if d <= effectiveRange and d < bestDist then
                     bestDist = d
                     bestM = m
                 end
@@ -309,16 +324,69 @@ function M.UpdateTowerAttacks(dt)
         tower.cooldown = tower.cooldown - dt
         if tower.cooldown <= 0 and bestM then
             local dmg = M.CalcTowerDamage(tower)
-            -- 圣器弹道形态: area → AOE 爆炸弹
-            if tower.artBulletForm == "area" and tower.artAreaRadius > 0 then
+            -- 共振触发: 下次攻击×倍数（激活时由 SkillSystem 写入）
+            local nextMult = tower.artNextShotMult or 1.0
+            if nextMult > 1.0 then
+                dmg = dmg * nextMult
+                tower.artNextShotMult = 1.0  -- 消耗一次
+                if tower.artNextShotPierce then
+                    -- 临时叠加穿透
+                    tower.artPierceCount = (tower.artPierceCount or 0) + 1
+                    tower._resonancePierceAdded = true
+                end
+            end
+            -- 暴击装置 + 光环暴击: 随机暴击
+            local totalCritChance = (tower.artCritChance or 0) + (tower.auraCritBonus or 0)
+            local isCrit = false
+            if totalCritChance > 0 and math.random() < totalCritChance then
+                dmg = dmg * (tower.artCritMult or 3.0)
+                isCrit = true
+            end
+            -- 圣器弹道形态
+            if tower.artBulletForm == "laser" then
+                -- 棱镜激光: 穿透射程末端，对射程内所有怪一次性造成伤害
+                local Monster = require("Monster")
+                -- effectiveRange 已在外层定义，直接复用
+                for _, m in ipairs(GS.monsters) do
+                    if m.node and m.hp > 0 then
+                        local dx = m.node.position.x - tower.gx
+                        local dz = m.node.position.z - tower.gz
+                        if math.sqrt(dx*dx + dz*dz) <= effectiveRange then
+                            m.lastHitTower = tower
+                            Monster.DamageMonster(m, dmg)
+                            StatusEffect.ProcessOnHitEffects(m, dmg, tower)
+                            -- 蓄力击
+                            if (tower.artEnergyPerHits or 0) > 0 then
+                                tower.artHitCounter = (tower.artHitCounter or 0) + 1
+                                if tower.artHitCounter >= tower.artEnergyPerHits then
+                                    tower.artHitCounter = 0
+                                    GS.energy = GS.energy + 1
+                                end
+                            end
+                        end
+                    end
+                end
+            elseif tower.artBulletForm == "area" and tower.artAreaRadius > 0 then
                 M.FireAreaProjectile(tower, bestM, dmg, tower.artAreaRadius)
             else
                 M.FireProjectile(tower, bestM, dmg)
             end
+            -- 共振穿透：开火后立即撤销临时叠加
+            if tower._resonancePierceAdded then
+                tower.artPierceCount = math.max(0, (tower.artPierceCount or 1) - 1)
+                tower.artNextShotPierce = false
+                tower._resonancePierceAdded = false
+            end
             -- 攻速: ratio 越高→interval 越短→攻速越快; 下限 30%
             local speedMult = math.max(0.30, tower.ratio * #GS.towers)
-            -- 圣器攻速乘数
+            -- 圣器攻速乘数 × 光环攻速加成 × 借力圣器的范围惩罚
             speedMult = speedMult * (tower.artAtkSpdMult or 1.0)
+            speedMult = speedMult * (1.0 + (tower.auraAtkSpdBonus or 0))
+            speedMult = speedMult * (1.0 - (tower.artBorrowPenalty or 0))
+            -- 注能弹药: 全塔攻速×2（GS.energyAmmoActive）
+            if GS.energyAmmoActive then
+                speedMult = speedMult * 2.0
+            end
             tower.cooldown = CONFIG.TowerFireInterval / math.max(0.10, speedMult)
         end
 
@@ -340,12 +408,16 @@ function M.FireProjectile(tower, targetMonster, dmg)
     model:SetModel(cache:GetResource("Model", "Meshes/TD/weapon-ammo-cannonball.mdl"))
     model:SetMaterial(cache:GetResource("Material", "Materials/TD/weapon-ammo-cannonball_00_colormap.xml"))
 
+    local pierceCount = tower.artPierceCount or 0
     local proj = {
         node = node,
         target = targetMonster,
         speed = CONFIG.ProjectileSpeed,
         damage = dmg,
-        sourceTower = tower,  -- 圣器命中效果需要
+        sourceTower = tower,
+        -- 穿透弹芯
+        pierceLeft = pierceCount,   -- 剩余穿透次数（0 = 不穿透）
+        pierceHit  = {},            -- 已命中过的怪物 set {monster = true}
     }
     table.insert(GS.projectiles, proj)
 end
@@ -380,6 +452,76 @@ function M.FireAreaProjectile(tower, targetMonster, dmg, radius)
     table.insert(GS.projectiles, proj)
 end
 
+-- 辅助: 炮弹命中单体怪物后的通用处理 (命中效果 / 蓄力击 / 充能矩阵)
+local function OnSingleHit(p, m, Monster)
+    -- 金矿炼化: 记录击杀来源塔，用于 KillMonster 里的金币加成
+    m.lastHitTower = p.sourceTower
+    Monster.DamageMonster(m, p.damage)
+    if not p.sourceTower then return end
+    local t = p.sourceTower
+    StatusEffect.ProcessOnHitEffects(m, p.damage, t)
+    -- 蓄力击: 每 N 次命中产生 1 主动能量
+    if (t.artEnergyPerHits or 0) > 0 then
+        t.artHitCounter = (t.artHitCounter or 0) + 1
+        if t.artHitCounter >= t.artEnergyPerHits then
+            t.artHitCounter = 0
+            GS.energy = GS.energy + 1
+        end
+    end
+    -- 充能矩阵: 击杀时概率+能量
+    if (t.artEnergyOnKillChance or 0) > 0 and m.hp <= 0 then
+        if math.random() < t.artEnergyOnKillChance then
+            GS.energy = GS.energy + (t.artEnergyOnKillAmount or 1)
+        end
+    end
+end
+
+-- 辅助: 在 pos 附近生成分裂小弹片（splinter），排除 excludeSet 中的怪物
+local function SpawnSplinters(p, hitPos, count, dmgPct, excludeSet, Monster)
+    -- 找 count 个最近的未命中怪物
+    local targets = {}
+    for _, m in ipairs(GS.monsters) do
+        if m.node and m.hp > 0 and not excludeSet[m] then
+            local dx = m.node.position.x - hitPos.x
+            local dz = m.node.position.z - hitPos.z
+            table.insert(targets, { m = m, d = dx*dx + dz*dz })
+        end
+    end
+    table.sort(targets, function(a, b) return a.d < b.d end)
+
+    local splinterDmg = p.damage * (dmgPct or 0.25)
+    for k = 1, math.min(count, #targets) do
+        local tgt = targets[k].m
+        local node = GS.scene:CreateChild("Splinter")
+        local s = CONFIG.ProjectileSize / 0.28 * 0.6
+        node.scale = Vector3(s, s, s)
+        node.position = hitPos
+
+        local model = node:CreateComponent("StaticModel")
+        model:SetModel(cache:GetResource("Model", "Meshes/TD/weapon-ammo-cannonball.mdl"))
+        -- 分裂弹用黄色区分
+        local mat = Material:new()
+        mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+        mat:SetShaderParameter("MatDiffColor",    Variant(Color(1.0, 0.85, 0.1, 1)))
+        mat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.6, 0.5, 0.05)))
+        mat:SetShaderParameter("Metallic",  Variant(0.0))
+        mat:SetShaderParameter("Roughness", Variant(0.5))
+        model:SetMaterial(mat)
+
+        local sp = {
+            node       = node,
+            target     = tgt,
+            speed      = CONFIG.ProjectileSpeed * 1.2,
+            damage     = splinterDmg,
+            sourceTower = p.sourceTower,
+            isSplinter = true,  -- 分裂弹不再分裂
+            pierceLeft = 0,
+            pierceHit  = {},
+        }
+        table.insert(GS.projectiles, sp)
+    end
+end
+
 function M.UpdateProjectiles(dt)
     local Monster = require("Monster")
     local i = 1
@@ -388,14 +530,37 @@ function M.UpdateProjectiles(dt)
         if not p.node then
             table.remove(GS.projectiles, i)
         elseif not p.target or not p.target.node or p.target.hp <= 0 then
-            p.node:Remove()
-            table.remove(GS.projectiles, i)
+            -- 目标已死 / 消失
+            if p.pierceLeft and p.pierceLeft > 0 then
+                -- 穿透弹: 目标消失时尝试重定向到新目标
+                local newTgt = nil
+                local bestD = math.huge
+                for _, m in ipairs(GS.monsters) do
+                    if m.node and m.hp > 0 and not p.pierceHit[m] then
+                        local dx = p.node.position.x - m.node.position.x
+                        local dz = p.node.position.z - m.node.position.z
+                        local d = dx*dx + dz*dz
+                        if d < bestD then bestD = d; newTgt = m end
+                    end
+                end
+                if newTgt then
+                    p.target = newTgt
+                    i = i + 1
+                else
+                    p.node:Remove()
+                    table.remove(GS.projectiles, i)
+                end
+            else
+                p.node:Remove()
+                table.remove(GS.projectiles, i)
+            end
         else
             local pos = p.node.position
             local tpos = p.target.node.position
             local dir = tpos - pos
             local dist = dir:Length()
             if dist < 0.3 then
+                -- ── 命中 ──
                 if p.isArea and p.areaRadius and p.areaRadius > 0 then
                     -- AOE 爆炸: 伤害范围内所有怪物
                     local hitPos = p.target.node.position
@@ -405,24 +570,61 @@ function M.UpdateProjectiles(dt)
                             local dz = m.node.position.z - hitPos.z
                             local d = math.sqrt(dx * dx + dz * dz)
                             if d <= p.areaRadius then
+                                m.lastHitTower = p.sourceTower
                                 Monster.DamageMonster(m, p.damage)
-                                -- 圣器命中效果
                                 if p.sourceTower then
                                     StatusEffect.ProcessOnHitEffects(m, p.damage, p.sourceTower)
                                 end
                             end
                         end
                     end
+                    p.node:Remove()
+                    table.remove(GS.projectiles, i)
                 else
                     -- 单体命中
-                    Monster.DamageMonster(p.target, p.damage)
-                    -- 圣器命中效果
-                    if p.sourceTower then
-                        StatusEffect.ProcessOnHitEffects(p.target, p.damage, p.sourceTower)
+                    local hitMonster = p.target
+                    local hitPos = hitMonster.node.position
+                    p.pierceHit[hitMonster] = true
+                    OnSingleHit(p, hitMonster, Monster)
+
+                    -- 裂片圣器: 命中后分裂（非分裂弹自身不再二次分裂）
+                    if not p.isSplinter and p.sourceTower then
+                        local t = p.sourceTower
+                        for _, onHit in ipairs(t.artOnHit or {}) do
+                            if onHit.status == "splinter" and (onHit.splinter_count or 0) > 0 then
+                                SpawnSplinters(p, hitPos, onHit.splinter_count,
+                                    onHit.splinter_damage_pct, p.pierceHit, Monster)
+                                break
+                            end
+                        end
+                    end
+
+                    -- 穿透弹芯: 还有穿透次数则重定向到下一个目标
+                    if (p.pierceLeft or 0) > 0 then
+                        p.pierceLeft = p.pierceLeft - 1
+                        -- 找最近的未命中怪物
+                        local newTgt = nil
+                        local bestD = math.huge
+                        for _, m in ipairs(GS.monsters) do
+                            if m.node and m.hp > 0 and not p.pierceHit[m] then
+                                local dx = p.node.position.x - m.node.position.x
+                                local dz = p.node.position.z - m.node.position.z
+                                local d = dx*dx + dz*dz
+                                if d < bestD then bestD = d; newTgt = m end
+                            end
+                        end
+                        if newTgt then
+                            p.target = newTgt
+                            i = i + 1
+                        else
+                            p.node:Remove()
+                            table.remove(GS.projectiles, i)
+                        end
+                    else
+                        p.node:Remove()
+                        table.remove(GS.projectiles, i)
                     end
                 end
-                p.node:Remove()
-                table.remove(GS.projectiles, i)
             else
                 dir = dir / dist
                 pos = pos + dir * p.speed * dt

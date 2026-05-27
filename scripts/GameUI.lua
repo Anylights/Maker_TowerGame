@@ -97,9 +97,10 @@ local towerDetailVisible_ = false
 local currentDetailTower_ = nil
 
 -- ---- 背包面板动画 ----
-local INV_PANEL_HEIGHT = 120
+-- 高度由内容自动决定，最高不超过屏幕高度 1/3（在 BuildInventoryPanel 中动态计算 maxHeight）
+-- INV_BOTTOM_HIDDEN 用足够大的负值确保完全隐藏（屏幕高度 1/3 + 余量）
 local INV_BOTTOM_SHOWN = 8
-local INV_BOTTOM_HIDDEN = -(INV_PANEL_HEIGHT + 20)
+local INV_BOTTOM_HIDDEN = -400   -- 初始占位值，CreateGameUI 中根据屏幕尺寸覆盖
 local INV_ANIM_DURATION = 0.35
 
 local invCurrentBottom_ = INV_BOTTOM_HIDDEN
@@ -150,48 +151,60 @@ local tooltipDownsideLabel_ = nil
 -- 圣器视觉映射
 -- ============================================================================
 
--- 全圣器图标（1~2汉字缩写）
+-- 全圣器图标（单字）
 local ARTIFACT_ICONS = {
-    -- 攻击类
-    rapid_fire_module  = "速射",
-    fire_seed          = "火种",
-    ice_crystal        = "冰晶",
-    corrosion          = "腐蚀",
-    thunder            = "雷鸣",
-    splinter           = "裂片",
-    piercing_core      = "穿透",
-    sniper_mod         = "狙击",
-    prism              = "棱镜",
-    high_explosive     = "高爆",
-    crit_device        = "暴击",
-    resonance_trigger  = "共振",
-    elemental_core     = "元素",
-    -- 增益类
-    aura_attack_speed  = "攻环",
-    aura_damage        = "伤环",
-    aura_range         = "程环",
-    aura_crit          = "暴环",
-    range_compression  = "远压",
-    power_borrow       = "借力",
-    master_tower       = "总管",
-    defense_garrison   = "防阵",
-    network            = "网络",
-    devour_line        = "吞线",
-    ice_crystal_conduit = "冰管",
-    resonance_amplifier = "放大",
-    elemental_reaction = "元反",
-    overload_relay     = "过载",
-    energy_ammo        = "注能",
-    -- 收集类
-    coin_magnet        = "磁币",
-    gold_refinery      = "炼金",
-    energy_matrix      = "充能",
-    charged_hit        = "蓄力",
-    condenser          = "凝聚",
-    resource_enrichment = "富集",
-    compound_interest  = "复利",
-    feedback_coil      = "反馈",
+    -- 攻击类（红色系）
+    rapid_fire_module  = "速",
+    fire_seed          = "火",
+    ice_crystal        = "冰",
+    corrosion          = "腐",
+    thunder            = "雷",
+    splinter           = "裂",
+    piercing_core      = "穿",
+    sniper_mod         = "狙",
+    prism              = "棱",
+    high_explosive     = "爆",
+    crit_device        = "暴",
+    resonance_trigger  = "振",
+    elemental_core     = "元",
+    -- 增益类（蓝色系）
+    aura_attack_speed  = "速",
+    aura_damage        = "伤",
+    aura_range         = "程",
+    aura_crit          = "暴",
+    range_compression  = "远",
+    power_borrow       = "借",
+    master_tower       = "管",
+    defense_garrison   = "阵",
+    network            = "网",
+    devour_line        = "吞",
+    ice_crystal_conduit = "导",
+    resonance_amplifier = "放",
+    elemental_reaction = "反",
+    overload_relay     = "载",
+    energy_ammo        = "注",
+    -- 收集类（绿色系）
+    coin_magnet        = "磁",
+    gold_refinery      = "炼",
+    energy_matrix      = "充",
+    charged_hit        = "蓄",
+    condenser          = "凝",
+    resource_enrichment = "富",
+    compound_interest  = "利",
+    feedback_coil      = "馈",
 }
+
+-- 图标文字颜色按 category 区分（鲜艳，可读性高）
+local _CAT_ICON_COLOR = {
+    attack     = { 255, 110,  80, 255 },   -- 橙红
+    buff       = {  80, 180, 255, 255 },   -- 天蓝
+    collection = {  80, 230, 130, 255 },   -- 翠绿
+}
+
+local function artifactIconColor(def)
+    if not def then return { 255, 255, 255, 255 } end
+    return _CAT_ICON_COLOR[def.category] or { 255, 255, 255, 255 }
+end
 
 -- 背景色按 category 区分: 攻击=暗红, 增益=深蓝, 收集=暗绿
 local _CAT_BG = {
@@ -471,6 +484,14 @@ end
 -- ============================================================================
 
 function M.CreateGameUI()
+    -- 根据屏幕尺寸更新背包隐藏位置（须在建立 UI 前确定）
+    local _dpr = graphics:GetDPR()
+    local _sh = graphics:GetHeight() / _dpr
+    INV_BOTTOM_HIDDEN = -(math.floor(_sh / 3) + 30)
+    invCurrentBottom_ = INV_BOTTOM_HIDDEN
+    invAnimFrom_      = INV_BOTTOM_HIDDEN
+    invAnimTo_        = INV_BOTTOM_HIDDEN
+
     -- ---- HUD 标签 ----
     goldLabel_ = UI.Label {
         text = "", fontSize = 15,
@@ -709,6 +730,7 @@ end
 function M.BuildInventoryPanel()
     invSlots_ = {}
     local slotChildren = {}
+    local slotCounter = 0   -- 提前声明，动态宽度计算需要在 if/else 之外访问
 
     if #GS.artifactInventory == 0 then
         table.insert(slotChildren, UI.Panel {
@@ -744,33 +766,26 @@ function M.BuildInventoryPanel()
             end
         end
 
-        local slotCounter = 0
         for _, id in ipairs(order) do
             local g = groups[id]
-            local entry = GS.artifactInventory[g.firstUnequippedIdx or 1]
-            -- 若全部已装备则用任意一个 entry 显示（置灰）
-            if not entry then
-                for _, e in ipairs(GS.artifactInventory) do
-                    if e.id == id then entry = e; break end
-                end
-            end
+            -- 全部已装备 → 背包里不显示该圣器
+            if g.unequippedCount == 0 then goto continue end
+
+            local entry = GS.artifactInventory[g.firstUnequippedIdx]
             if not entry then goto continue end
 
-            local icon = ARTIFACT_ICONS[entry.id] or entry.def.name:sub(1, 4)
+            local icon = ARTIFACT_ICONS[entry.id] or entry.def.name:sub(1, 1)
             local rc = rarityColor(entry.def.rarity)
-            local totalCount = g.unequippedCount + g.equippedCount
+            local unequippedCount = g.unequippedCount
+            local iconClr = artifactIconColor(entry.def)
 
-            -- 可拖拽 itemData 只在有未装备时提供
-            local itemData = nil
-            if g.firstUnequippedIdx then
-                itemData = {
-                    id = entry.id,
-                    name = entry.def.name,
-                    icon = icon,
-                    type = "artifact",
-                    invIndex = g.firstUnequippedIdx,
-                }
-            end
+            local itemData = {
+                id = entry.id,
+                name = entry.def.name,
+                icon = icon,
+                type = "artifact",
+                invIndex = g.firstUnequippedIdx,
+            }
 
             slotCounter = slotCounter + 1
             local slot = ItemSlot {
@@ -781,9 +796,13 @@ function M.BuildInventoryPanel()
                 dragContext = dragCtx_,
                 size = 52,
             }
+            -- ItemSlot 内部硬编码白色，创建后覆写图标颜色
+            if slot.iconLabel_ then
+                slot.iconLabel_:SetStyle({ fontColor = iconClr })
+            end
 
-            -- 数量徽章（叠在图标右下角）
-            local badgeNode = (totalCount > 1) and UI.Panel {
+            -- 数量徽章：只显示未装备数量，≥2 时才显示
+            local badgeNode = (unequippedCount > 1) and UI.Panel {
                 position = "absolute",
                 bottom = 1, right = 1,
                 paddingX = 3, paddingY = 1,
@@ -792,18 +811,11 @@ function M.BuildInventoryPanel()
                 pointerEvents = "none",
                 children = {
                     UI.Label {
-                        text = "×" .. totalCount,
+                        text = "×" .. unequippedCount,
                         fontSize = 9, fontColor = CLR.gold,
                         pointerEvents = "none",
                     },
                 },
-            } or nil
-
-            -- 装备状态文字（有装备时显示）
-            local statusNode = (g.equippedCount > 0) and UI.Label {
-                text = "已装" .. g.equippedCount,
-                fontSize = 7, fontColor = CLR.success,
-                textAlign = "center",
             } or nil
 
             -- 图标容器（相对定位，用于放置数量徽章）
@@ -831,7 +843,6 @@ function M.BuildInventoryPanel()
                         fontSize = 8, fontColor = rc,
                         textAlign = "center", maxWidth = 56,
                     },
-                    statusNode,
                 },
             }
 
@@ -841,67 +852,45 @@ function M.BuildInventoryPanel()
         end
     end
 
+    -- 固定宽度：左右各留 60px 边距（通过 left/right 撑满）
+    -- 高度自适应内容，最高不超过屏幕高度 1/3（可纵向滚动）
+    local dpr = graphics:GetDPR()
+    local logicalScreenH = graphics:GetHeight() / dpr
+    local maxPanelH = math.floor(logicalScreenH / 3)
+
     local panel = UI.Panel {
         position = "absolute",
         bottom = INV_BOTTOM_HIDDEN,
         left = 60, right = 60,
-        height = INV_PANEL_HEIGHT,
-        flexDirection = "row", gap = 0,
+        maxHeight = maxPanelH,
+        flexDirection = "column", gap = 0,
         backgroundColor = CLR.panelBg,
         borderRadius = 0,
         borderWidth = 2, borderColor = CLR.panelBorder,
         boxShadow = CLR.panelShadow,
-        overflow = "hidden",
         children = {
-            -- 左侧标签区
+            -- 顶部标题栏
             UI.Panel {
-                height = "100%", width = 50,
-                flexDirection = "column", justifyContent = "center",
-                alignItems = "center", gap = 4,
-                backgroundColor = CLR.panelBgDark,
-                borderRightWidth = 2, borderRightColor = CLR.panelBorder,
-                flexShrink = 0,
-                children = {
-                    UI.Label {
-                        text = "背包",
-                        fontSize = 11, fontColor = CLR.gold,
-                    },
-                    UI.Label {
-                        text = "[B]",
-                        fontSize = 9, fontColor = CLR.muted,
-                    },
-                },
-            },
-            -- 水平可滚动槽位区
-            UI.ScrollView {
-                height = "100%",
-                flexGrow = 1, flexBasis = 0,
-                scrollX = true,
-                children = {
-                    UI.Panel {
-                        flexDirection = "row", gap = 6,
-                        alignItems = "center",
-                        paddingX = 8, paddingY = 6,
-                        height = "100%",
-                        children = slotChildren,
-                    },
-                },
-            },
-            -- 右侧提示区
-            UI.Panel {
-                height = "100%", width = 50,
-                flexDirection = "column", justifyContent = "center",
+                flexDirection = "row",
+                justifyContent = "space-between",
                 alignItems = "center",
-                backgroundColor = CLR.panelBgDark,
-                borderLeftWidth = 2, borderLeftColor = CLR.panelBorder,
+                paddingX = 12, paddingY = 5,
                 flexShrink = 0,
+                backgroundColor = CLR.panelBgDark,
+                borderBottomWidth = 2, borderBottomColor = CLR.panelBorder,
                 children = {
-                    UI.Label {
-                        text = "拖拽\n到\n塔上",
-                        fontSize = 8, fontColor = CLR.muted,
-                        textAlign = "center",
-                    },
+                    UI.Label { text = "背包", fontSize = 11, fontColor = CLR.gold },
+                    UI.Label { text = "拖拽圣器到防御塔安装  [B] 收起", fontSize = 9, fontColor = CLR.muted },
                 },
+            },
+            -- 多行换行网格：高度由内容决定，超出 maxHeight 时纵向滚动
+            UI.Panel {
+                flexDirection = "row",
+                flexWrap = "wrap",
+                gap = 6,
+                paddingX = 10, paddingY = 8,
+                overflow = "scroll",
+                children = slotChildren,
             },
         },
     }
@@ -1102,6 +1091,7 @@ function M.BuildTooltipPanel()
         position = "absolute",
         top = -9999, left = -9999,
         display = "none",
+        zIndex = 9999,          -- 最高层级，不被任何面板遮挡
         flexDirection = "column", gap = 5,
         paddingX = 12, paddingY = 10,
         backgroundColor = { 18, 30, 60, 242 },
@@ -1156,14 +1146,25 @@ function M.ShowArtifactTooltip(def, screenX, screenY)
         tooltipDownsideLabel_:SetStyle({ display = "none" })
     end
 
-    -- 位置：优先显示在光标右侧，靠近屏幕边缘时左移
-    local w = graphics:GetWidth() / graphics:GetDPR()
+    -- 位置：右侧优先，近右边缘时左移；纵向超出底部时向上弹出
+    local dprV = graphics:GetDPR()
+    local sw = graphics:GetWidth() / dprV
+    local sh = graphics:GetHeight() / dprV
     local tipW = 220
+    local tipH = 140   -- 估算高度（含名称+稀有度+描述）
     local tipX = screenX + 14
-    if tipX + tipW > w - 10 then
+    if tipX + tipW > sw - 10 then
         tipX = screenX - tipW - 14
     end
-    local tipY = screenY - 10
+    tipX = math.max(4, tipX)
+    -- 纵向：若光标在屏幕下半区则向上显示，避免超出底部
+    local tipY
+    if screenY + tipH + 20 > sh then
+        tipY = screenY - tipH - 10
+    else
+        tipY = screenY - 10
+    end
+    tipY = math.max(4, tipY)
 
     tooltipPanel_:SetStyle({ display = "flex", top = math.floor(tipY), left = math.floor(tipX) })
 end
@@ -1396,10 +1397,14 @@ function M.RefreshTowerDetail()
                     slot:SetItem({
                         id = entry.id,
                         name = entry.def.name,
-                        icon = ARTIFACT_ICONS[entry.id] or entry.def.name:sub(1, 4),
+                        icon = ARTIFACT_ICONS[entry.id] or entry.def.name:sub(1, 1),
                         type = "artifact",
                         invIndex = invIdx,
                     })
+                    -- SetItem 会重置颜色为白色，覆写图标颜色
+                    if slot.iconLabel_ then
+                        slot.iconLabel_:SetStyle({ fontColor = artifactIconColor(entry.def) })
+                    end
                 else
                     slot:SetItem(nil)
                 end
@@ -1772,7 +1777,7 @@ function M.ShowDropOverlay()
         local rc = rarityColor(def.rarity)
         local bc = rarityBorderColor(def.rarity)
         local bg = artifactBg(def)
-        local icon = ARTIFACT_ICONS[def.id] or def.name:sub(1, 4) or "?"
+        local icon = ARTIFACT_ICONS[def.id] or def.name:sub(1, 1) or "?"
 
         local dsText = ""
         for _, ds in ipairs(def.downsides) do
@@ -1972,7 +1977,7 @@ local function isMouseOverUIPanel()
         local panelLeft = 60
         local panelRight = screenW - 60
         local panelBottom = screenH - invCurrentBottom_
-        local panelTop = panelBottom - INV_PANEL_HEIGHT
+        local panelTop = panelBottom - math.floor(screenH / 3)  -- 面板高度上限 = 屏高1/3
 
         local mx = input.mousePosition.x / dpr
         local my = input.mousePosition.y / dpr

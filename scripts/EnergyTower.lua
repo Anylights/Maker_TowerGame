@@ -1833,14 +1833,24 @@ function M.UpdateLineDamage(dt)
             local mx = m.node.position.x
             local mz = m.node.position.z
 
-            -- 判断是否踩在任意有功率的线段上
+            -- 判断是否踩在任意有功率的线段上，同时收集 devour_line 最大倍率
             local onLine = false
+            local bestLineMult = 1.0  -- devour_line: 踩中线段所属塔的最大 artLineMultiplier
             for eKey, edge in pairs(graph.edges) do
                 local edgePwr = net.edgePower[eKey]
                 if edgePwr and edgePwr > 0 then
                     if PointToSegmentDist(mx, mz, edge.x1, edge.z1, edge.x2, edge.z2) < hitRadius then
                         onLine = true
-                        break
+                        -- 收集该边端点塔的 artLineMultiplier（取最大值）
+                        local n1 = edge.x1 .. "," .. edge.z1
+                        local n2 = edge.x2 .. "," .. edge.z2
+                        for _, t in ipairs(GS.towers) do
+                            local tKey = t.gx .. "," .. t.gz
+                            if (tKey == n1 or tKey == n2) and (t.artLineMultiplier or 1.0) > bestLineMult then
+                                bestLineMult = t.artLineMultiplier
+                            end
+                        end
+                        -- 不 break，继续扫描其余线段以收集更大倍率
                     end
                 end
             end
@@ -1851,8 +1861,8 @@ function M.UpdateLineDamage(dt)
                     m.hp = math.min(m.hp + m.lineHealPerSec * tickInterval, m.maxHp)
                 end
 
-                -- 线伤减免
-                local finalDmg = dmgPerTick
+                -- 线伤减免 + devour_line 倍率
+                local finalDmg = dmgPerTick * bestLineMult
                 if m.lineDmgReduction and m.lineDmgReduction > 0 then
                     finalDmg = finalDmg * (1.0 - m.lineDmgReduction)
                 end
@@ -1871,6 +1881,52 @@ function M.UpdateLineDamage(dt)
                     lineDmgDisplay_[id] = disp
                 end
                 disp.accum = disp.accum + finalDmg
+            end
+
+            -- network 圣器次级能源线伤害
+            -- 每个有 artNetworkLinks 的塔，向周围 range 内最多 max_links 座塔连虚拟线
+            -- 怪物踩在虚拟线上 → 受到 dmgPerTick × line_ratio 的次级伤害
+            for _, srcTower in ipairs(GS.towers) do
+                if srcTower.artNetworkLinks then
+                    local srcKey = srcTower.gx .. "," .. srcTower.gz
+                    -- 仅当该塔在有效网络中才有线伤
+                    if net.validNodes and net.validNodes[srcKey] then
+                        local nRange    = srcTower.artNetworkRange   or 3
+                        local maxLinks  = srcTower.artNetworkMaxLinks or 3
+                        local lineRatio = srcTower.artNetworkRatio    or 0.35
+                        local linkCount = 0
+                        for _, dstTower in ipairs(GS.towers) do
+                            if dstTower ~= srcTower and linkCount < maxLinks then
+                                local ddx = dstTower.gx - srcTower.gx
+                                local ddz = dstTower.gz - srcTower.gz
+                                if math.sqrt(ddx*ddx + ddz*ddz) <= nRange then
+                                    linkCount = linkCount + 1
+                                    -- 判断怪物是否在该虚拟线段上
+                                    if PointToSegmentDist(mx, mz,
+                                            srcTower.gx, srcTower.gz,
+                                            dstTower.gx, dstTower.gz) < hitRadius then
+                                        local netDmg = math.max(1, math.floor(
+                                            dmgPerTick * lineRatio + 0.5))
+                                        if m.lineDmgReduction and m.lineDmgReduction > 0 then
+                                            netDmg = math.floor(netDmg * (1.0 - m.lineDmgReduction))
+                                        end
+                                        if netDmg >= 1 then
+                                            local nid = tostring(m.node:GetID())
+                                            Monster.DamageMonster(m, netDmg, true, true)
+                                            local ndisp = lineDmgDisplay_[nid]
+                                            if not ndisp then
+                                                ndisp = { accum = 0, cd = showInterval }
+                                                lineDmgDisplay_[nid] = ndisp
+                                            end
+                                            ndisp.accum = ndisp.accum + netDmg
+                                        end
+                                        break  -- 同一虚拟边只算一次
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
             end
 
             ::continue_monster::

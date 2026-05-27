@@ -1,5 +1,5 @@
 -- ============================================================================
--- StatusEffect.lua — 状态效果系统 (燃烧/冰冻/腐蚀/闪电连锁)
+-- StatusEffect.lua — 状态效果系统 (燃烧/冰冻/腐蚀/闪电连锁/感电/元素反应)
 -- 参照 data/balance.json → status_effects
 -- ============================================================================
 
@@ -38,6 +38,9 @@ M.PARAMS = {
         decay_per_jump = 0.35,  -- 每跳衰减 35%
         max_range = 2,          -- 跳跃范围 2 格
     },
+    electric = {
+        duration = 3.0,         -- 感电持续 3 秒（chain_lightning 命中后留下）
+    },
 }
 
 -- ============================================================================
@@ -52,6 +55,7 @@ function M.InitMonsterEffects(monster)
         burn = nil,      -- { dps, timer, totalDmg, tickAcc }
         freeze = nil,    -- { stacks, frozen, frozenTimer, decayAcc }
         corrode = nil,   -- { stacks, timer }
+        electric = nil,  -- { timer }  感电（chain_lightning 命中留下的持续标记）
     }
     monster.speedMultiplier = 1.0  -- 速度乘数 (冰冻减速用)
 end
@@ -176,6 +180,30 @@ function M.ApplyChainLightning(sourceMonster, hitDmg, jumps, decay, range, effec
         hit[bestM] = true
         lastPos = bestM.node.position  -- 先记录位置，DamageMonster 可能移除 node
         Monster.DamageMonster(bestM, currentDmg)
+        -- 感电标记: chain_lightning 命中的每个目标留下 electric 状态
+        if bestM.statusEffects then
+            local elec = bestM.statusEffects.electric
+            local dur = M.PARAMS.electric.duration
+            if elec then
+                elec.timer = math.max(elec.timer, dur)  -- 刷新
+            else
+                bestM.statusEffects.electric = { timer = dur }
+            end
+        end
+    end
+end
+
+--- 施加感电标记（可独立调用）
+--- @param monster table
+--- @param duration number 持续时间（可选，默认3秒）
+function M.ApplyElectric(monster, duration)
+    if not monster.statusEffects then return end
+    duration = duration or M.PARAMS.electric.duration
+    local cur = monster.statusEffects.electric
+    if cur then
+        cur.timer = math.max(cur.timer, duration)
+    else
+        monster.statusEffects.electric = { timer = duration }
     end
 end
 
@@ -207,6 +235,88 @@ function M.ProcessOnHitEffects(monster, hitDmg, tower)
             M.ApplyChainLightning(monster, hitDmg,
                 oh.jumps, oh.decay, oh.range, eff)
         end
+    end
+
+    -- 元素反应: 仅当塔有 artHasElementalReaction 时检测
+    if tower and tower.artHasElementalReaction then
+        M.TriggerElementalReaction(monster, hitDmg, tower)
+    end
+end
+
+-- ============================================================================
+-- 元素反应 (elemental_reaction 圣器)
+-- 燃烧+冰冻=蒸发 / 冰冻+感电=麻痹 / 感电+燃烧=过载 / 腐蚀+任意=侵蚀
+-- ============================================================================
+
+--- 元素反应触发
+--- @param monster table
+--- @param hitDmg number 本次命中伤害（用于计算反应伤害）
+--- @param tower table 触发反应的塔（用于记录击杀来源）
+function M.TriggerElementalReaction(monster, hitDmg, tower)
+    if not monster.statusEffects or not monster.node or monster.hp <= 0 then return end
+    local se = monster.statusEffects
+    local Monster = require("Monster")
+
+    local hasBurn    = se.burn    ~= nil
+    local hasFreeze  = se.freeze  ~= nil
+    local hasElec    = se.electric ~= nil
+    local hasCorrode = se.corrode  ~= nil
+
+    -- 侵蚀 (腐蚀 + 任意其他状态): 最高优先级，腐蚀所有层立即爆发为伤害
+    if hasCorrode and (hasBurn or hasFreeze or hasElec) then
+        local stacks = se.corrode.stacks or 1
+        local erosionDmg = math.max(1, math.floor(hitDmg * 0.5 * stacks + 0.5))
+        se.corrode = nil  -- 消耗腐蚀
+        monster.lastHitTower = tower
+        Monster.DamageMonster(monster, erosionDmg)
+        Utils.SpawnDmgText(monster.node.position, erosionDmg)
+        return  -- 侵蚀优先，不再触发其他反应
+    end
+
+    -- 蒸发 (燃烧 + 冰冻): 双重消耗，造成高额爆发
+    if hasBurn and hasFreeze then
+        local evapDmg = math.max(1, math.floor(hitDmg * 2.0 + 0.5))
+        se.burn   = nil
+        se.freeze = nil
+        monster.lastHitTower = tower
+        Monster.DamageMonster(monster, evapDmg)
+        Utils.SpawnDmgText(monster.node.position, evapDmg)
+        return
+    end
+
+    -- 麻痹 (冰冻 + 感电): 消耗感电，延长冻结时间
+    if hasFreeze and hasElec then
+        se.electric = nil  -- 消耗感电
+        local f = se.freeze
+        if f and f.frozen then
+            f.frozenTimer = f.frozenTimer + 2.0  -- 追加 2 秒冻结
+        elseif f then
+            -- 强制触发冻结
+            f.frozen = true
+            f.frozenTimer = M.PARAMS.freeze.freeze_duration + 1.0
+            f.stacks = 0
+        end
+        return
+    end
+
+    -- 过载 (感电 + 燃烧): 消耗感电，造成范围伤害
+    if hasElec and hasBurn then
+        se.electric = nil  -- 消耗感电
+        local overloadDmg = math.max(1, math.floor(hitDmg * 1.5 + 0.5))
+        -- 对 1.5 格内所有怪造成过载溅射
+        local pos = monster.node.position
+        for _, m2 in ipairs(GS.monsters) do
+            if m2.node and m2.hp > 0 then
+                local dx = m2.node.position.x - pos.x
+                local dz = m2.node.position.z - pos.z
+                if math.sqrt(dx*dx + dz*dz) <= 1.5 then
+                    m2.lastHitTower = tower
+                    Monster.DamageMonster(m2, overloadDmg)
+                    Utils.SpawnDmgText(m2.node.position, overloadDmg)
+                end
+            end
+        end
+        return
     end
 end
 
@@ -316,6 +426,14 @@ function M.UpdateMonsterEffects(m, dt)
             -- Boss 护甲 buff 正在生效，不恢复
         else
             m.armorRatio = m.baseArmorRatio
+        end
+    end
+
+    -- === 感电 ===
+    if se.electric then
+        se.electric.timer = se.electric.timer - dt
+        if se.electric.timer <= 0 then
+            se.electric = nil
         end
     end
 

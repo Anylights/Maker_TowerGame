@@ -296,6 +296,17 @@ M.GS = {
     -- 能源线伤害倍率 (局外升级 / 主动技能)
     lineDmgBaseMult = 1.0,        -- 局外升级: 线伤基础倍率
     lineDmgSkillMult = 1.0,       -- 主动技能: 运行时临时增益倍率
+
+    -- 主动技能系统 (Phase 2 圣器)
+    skillActive = false,          -- 是否有主动技能正在生效
+    -- 过载继电器: 全段线伤+150% 持续 5 秒
+    overloadRelayActive = false,
+    overloadRelayTimer = 0,
+    -- 注能弹药: 全塔攻速+100% 持续 5 秒
+    energyAmmoActive = false,
+    energyAmmoTimer = 0,
+    -- 能量上限惩罚 (各圣器叠加)
+    energyMaxPenalty = 0,         -- 当前已装备圣器合计的能量上限惩罚值
 }
 
 -- ============================================================================
@@ -387,6 +398,13 @@ function M.ResetGS()
 
     M.GS.lineDmgBaseMult = 1.0
     M.GS.lineDmgSkillMult = 1.0
+
+    M.GS.skillActive = false
+    M.GS.overloadRelayActive = false
+    M.GS.overloadRelayTimer = 0
+    M.GS.energyAmmoActive = false
+    M.GS.energyAmmoTimer = 0
+    M.GS.energyMaxPenalty = 0
 end
 
 return M

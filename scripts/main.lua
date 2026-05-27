@@ -16,6 +16,7 @@ local Artifact     = require("Artifact")
 local ArtifactVFX  = require("ArtifactVFX")
 local StatusEffect = require("StatusEffect")
 local SkillSystem  = require("SkillSystem")
+local VFXPreview   = require("VFXPreview")
 
 -- ============================================================================
 -- 生命周期
@@ -104,6 +105,21 @@ local SPEED_LEVELS = { 1, 2, 3 }
 ---@param eventData UpdateEventData
 function HandleUpdate(eventType, eventData)
     local rawDt = eventData["TimeStep"]:GetFloat()
+
+    -- P 键切换特效预览模式
+    if input:GetKeyPress(KEY_P) then
+        if VFXPreview.IsActive() then
+            VFXPreview.Exit()
+        else
+            VFXPreview.Enter()
+        end
+    end
+
+    -- 预览模式：仅处理预览逻辑，跳过游戏逻辑
+    if VFXPreview.IsActive() then
+        VFXPreview.Update(rawDt)
+        return
+    end
 
     -- Tab 切换游戏速度
     if input:GetKeyPress(KEY_TAB) then

@@ -862,7 +862,12 @@ function M.KillMonster(m)
     GS.monstersKilled = GS.monstersKilled + 1
 
     if m.goldDrop > 0 then
-        Utils.SpawnLoot(pos, "gold", m.goldDrop)
+        -- 金矿炼化: 击杀来源塔有 artGoldDropBonus 则增加掉落
+        local goldAmt = m.goldDrop
+        if m.lastHitTower and (m.lastHitTower.artGoldDropBonus or 0) > 0 then
+            goldAmt = math.floor(goldAmt * (1.0 + m.lastHitTower.artGoldDropBonus) + 0.5)
+        end
+        Utils.SpawnLoot(pos, "gold", goldAmt)
     end
     if m.energyDrop > 0 then
         Utils.SpawnLoot(Vector3(pos.x + 0.3, pos.y, pos.z + 0.3), "energy", m.energyDrop)
