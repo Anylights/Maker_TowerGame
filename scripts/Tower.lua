@@ -10,6 +10,43 @@ local EnergyTower = require("EnergyTower")
 local Artifact = require("Artifact")
 local StatusEffect = require("StatusEffect")
 
+-- 延迟加载，避免循环依赖
+local function GetArtVFX()
+    return require("ArtifactVFX")
+end
+
+-- 遍历塔身上装备的圣器，在子弹节点上生成拖尾特效
+local function ApplyBulletVFX(tower, projNode)
+    if not tower or not tower.slots or not projNode then return end
+    local ok, ArtVFX = pcall(GetArtVFX)
+    if not ok then return end
+    for i = 1, 4 do
+        local invIdx = tower.slots[i]
+        if invIdx then
+            local entry = GS.artifactInventory[invIdx]
+            if entry and entry.def then
+                ArtVFX.SpawnBulletVFX(projNode, entry.def.id)
+            end
+        end
+    end
+end
+
+-- 遍历塔身上装备的圣器，在命中位置生成爆炸特效
+local function ApplyHitVFX(tower, hitPos)
+    if not tower or not tower.slots or not hitPos then return end
+    local ok, ArtVFX = pcall(GetArtVFX)
+    if not ok then return end
+    for i = 1, 4 do
+        local invIdx = tower.slots[i]
+        if invIdx then
+            local entry = GS.artifactInventory[invIdx]
+            if entry and entry.def then
+                ArtVFX.SpawnHitVFX(GS.scene, hitPos, entry.def.id)
+            end
+        end
+    end
+end
+
 local M = {}
 
 -- ============================================================================
@@ -363,6 +400,10 @@ function M.UpdateTowerAttacks(dt)
                                     GS.energy = GS.energy + 1
                                 end
                             end
+                            -- 圣器激光命中爆炸特效
+                            if m.node then
+                                ApplyHitVFX(tower, m.node.position)
+                            end
                         end
                     end
                 end
@@ -420,6 +461,8 @@ function M.FireProjectile(tower, targetMonster, dmg)
         pierceHit  = {},            -- 已命中过的怪物 set {monster = true}
     }
     table.insert(GS.projectiles, proj)
+    -- 圣器子弹拖尾特效
+    ApplyBulletVFX(tower, node)
 end
 
 --- AOE 范围爆炸弹 (高爆圣器)
@@ -450,6 +493,8 @@ function M.FireAreaProjectile(tower, targetMonster, dmg, radius)
         areaRadius = radius,
     }
     table.insert(GS.projectiles, proj)
+    -- 圣器子弹拖尾特效
+    ApplyBulletVFX(tower, node)
 end
 
 -- 辅助: 炮弹命中单体怪物后的通用处理 (命中效果 / 蓄力击 / 充能矩阵)
@@ -473,6 +518,10 @@ local function OnSingleHit(p, m, Monster)
         if math.random() < t.artEnergyOnKillChance then
             GS.energy = GS.energy + (t.artEnergyOnKillAmount or 1)
         end
+    end
+    -- 圣器命中爆炸特效
+    if m.node then
+        ApplyHitVFX(t, m.node.position)
     end
 end
 
@@ -578,6 +627,8 @@ function M.UpdateProjectiles(dt)
                             end
                         end
                     end
+                    -- 圣器 AOE 命中爆炸特效（在爆心生成一次）
+                    ApplyHitVFX(p.sourceTower, hitPos)
                     p.node:Remove()
                     table.remove(GS.projectiles, i)
                 else

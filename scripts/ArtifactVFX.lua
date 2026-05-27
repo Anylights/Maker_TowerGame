@@ -190,6 +190,17 @@ local ANCHOR_OFFSETS = {
 }
 
 -- ============================================================================
+-- 弹道型圣器集合（这些圣器的特效在子弹拖尾和命中爆炸上，不挂在塔上）
+-- ============================================================================
+local BULLET_TYPE_ARTIFACTS = {
+    rapid_fire_module = true, fire_seed       = true, ice_crystal  = true,
+    corrosion         = true, thunder         = true, splinter     = true,
+    piercing_core     = true, sniper_mod      = true, high_explosive = true,
+    crit_device       = true, elemental_core  = true, overload_relay = true,
+    energy_ammo       = true, charged_hit     = true, feedback_coil  = true,
+}
+
+-- ============================================================================
 -- VFX 工厂表
 -- ============================================================================
 local VFX_CREATORS = {}
@@ -1353,6 +1364,9 @@ function M.OnEquip(tower, artifactId)
     if not tower or not tower.node then return end
     M.OnUnequip(tower, artifactId)
 
+    -- 弹道型圣器: 特效在子弹/命中处生成，塔上不显示
+    if BULLET_TYPE_ARTIFACTS[artifactId] then return end
+
     local creator = VFX_CREATORS[artifactId]
     if not creator then
         creator = function(n)
@@ -1424,6 +1438,360 @@ function M.GetAllArtifactIds()
     return ids
 end
 
+-- ============================================================================
+-- 子弹拖尾 VFX 配置（每种弹道型圣器一条配置，挂在 projNode 上）
+-- ============================================================================
+local BULLET_VFX = {}
+
+BULLET_VFX["rapid_fire_module"] = {
+    tex = TEX.pfx_sparks, tint = Color(2.5, 1.8, 0.2, 1), additive = true,
+    maxParticles = 8, emitRate = 30, life = 0.10,
+    sizeMin = 0.020, sizeMax = 0.045, shapeRadius = 0.02, gravity = 0,
+    velMin = Vector3(-0.12, -0.12, -0.12), velMax = Vector3(0.12, 0.12, 0.12),
+    colors = {
+        { time = 0.0, color = Color(3.0, 2.5, 0.3, 1.0) },
+        { time = 1.0, color = Color(0.8, 0.4, 0.0, 0.0) },
+    },
+}
+BULLET_VFX["fire_seed"] = {
+    tex = TEX.pfx_sparky_flame, tint = Color(2.5, 1.2, 0.1, 1), additive = true,
+    maxParticles = 8, emitRate = 25, life = 0.12,
+    sizeMin = 0.030, sizeMax = 0.060, shapeRadius = 0.02, gravity = 0,
+    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    colors = {
+        { time = 0.0, color = Color(3.0, 1.5, 0.1, 1.0) },
+        { time = 1.0, color = Color(1.0, 0.3, 0.0, 0.0) },
+    },
+}
+BULLET_VFX["ice_crystal"] = {
+    tex = TEX.pfx_icicle, tint = Color(0.5, 0.85, 2.0, 1),
+    maxParticles = 8, emitRate = 22, life = 0.13,
+    sizeMin = 0.025, sizeMax = 0.055, shapeRadius = 0.02, gravity = 0,
+    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
+    colors = {
+        { time = 0.0, color = Color(0.5, 0.9, 2.5, 1.0) },
+        { time = 1.0, color = Color(0.6, 0.8, 1.8, 0.0) },
+    },
+}
+BULLET_VFX["corrosion"] = {
+    tex = TEX.pfx_toxic, tint = Color(0.3, 1.2, 0.1, 1),
+    maxParticles = 6, emitRate = 18, life = 0.14,
+    sizeMin = 0.025, sizeMax = 0.050, shapeRadius = 0.02, gravity = 0,
+    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
+    colors = {
+        { time = 0.0, color = Color(0.3, 2.0, 0.1, 1.0) },
+        { time = 1.0, color = Color(0.1, 0.5, 0.0, 0.0) },
+    },
+}
+BULLET_VFX["thunder"] = {
+    tex = TEX.pfx_lightning, tint = Color(0.8, 0.3, 2.0, 1), additive = true,
+    maxParticles = 8, emitRate = 28, life = 0.09,
+    sizeMin = 0.040, sizeMax = 0.080, shapeRadius = 0.03, gravity = 0, rotSpeed = 360,
+    velMin = Vector3(-0.12, -0.12, -0.12), velMax = Vector3(0.12, 0.12, 0.12),
+    colors = {
+        { time = 0.0, color = Color(0.8, 0.3, 3.0, 1.0) },
+        { time = 1.0, color = Color(0.5, 0.2, 1.0, 0.0) },
+    },
+}
+BULLET_VFX["splinter"] = {
+    tex = TEX.pfx_rock_break, tint = Color(0.8, 0.8, 0.8, 1),
+    maxParticles = 6, emitRate = 15, life = 0.15,
+    sizeMin = 0.025, sizeMax = 0.050, shapeRadius = 0.02, gravity = 0.2, rotSpeed = 120,
+    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    colors = {
+        { time = 0.0, color = Color(1.0, 0.95, 0.85, 1.0) },
+        { time = 1.0, color = Color(0.5, 0.45, 0.40, 0.0) },
+    },
+}
+BULLET_VFX["piercing_core"] = {
+    tex = TEX.bullet_trail, tint = Color(1.5, 1.5, 2.0, 1), additive = true,
+    maxParticles = 10, emitRate = 32, life = 0.12,
+    sizeMin = 0.020, sizeMax = 0.045, shapeRadius = 0.01, gravity = 0,
+    velMin = Vector3(-0.06, -0.06, -0.06), velMax = Vector3(0.06, 0.06, 0.06),
+    colors = {
+        { time = 0.0, color = Color(1.5, 1.5, 2.5, 1.0) },
+        { time = 1.0, color = Color(0.8, 0.8, 1.5, 0.0) },
+    },
+}
+BULLET_VFX["sniper_mod"] = {
+    tex = TEX.soft_spot, tint = Color(2.0, 0.1, 0.1, 1), additive = true,
+    maxParticles = 4, emitRate = 12, life = 0.18,
+    sizeMin = 0.015, sizeMax = 0.030, shapeRadius = 0.01, gravity = 0,
+    velMin = Vector3(-0.04, -0.04, -0.04), velMax = Vector3(0.04, 0.04, 0.04),
+    colors = {
+        { time = 0.0, color = Color(2.0, 0.1, 0.1, 0.9) },
+        { time = 1.0, color = Color(1.0, 0.1, 0.1, 0.0) },
+    },
+}
+BULLET_VFX["high_explosive"] = {
+    tex = TEX.pfx_fire_meteor, tint = Color(2.0, 0.8, 0.1, 1), additive = true,
+    maxParticles = 10, emitRate = 28, life = 0.13,
+    sizeMin = 0.040, sizeMax = 0.080, shapeRadius = 0.03, gravity = 0, rotSpeed = 90,
+    velMin = Vector3(-0.12, -0.12, -0.12), velMax = Vector3(0.12, 0.12, 0.12),
+    colors = {
+        { time = 0.0, color = Color(3.0, 2.0, 0.2, 1.0) },
+        { time = 1.0, color = Color(0.5, 0.2, 0.1, 0.0) },
+    },
+}
+BULLET_VFX["crit_device"] = {
+    tex = TEX.pfx_star_shine, tint = Color(3.0, 2.5, 0.2, 1), additive = true,
+    maxParticles = 6, emitRate = 18, life = 0.14,
+    sizeMin = 0.025, sizeMax = 0.055, shapeRadius = 0.02, gravity = 0, rotSpeed = 180,
+    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
+    colors = {
+        { time = 0.0, color = Color(4.0, 3.5, 0.3, 1.0) },
+        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
+    },
+}
+BULLET_VFX["elemental_core"] = {
+    tex = TEX.pfx_eletric_aura, additive = true,
+    maxParticles = 8, emitRate = 22, life = 0.12,
+    sizeMin = 0.030, sizeMax = 0.060, shapeRadius = 0.02, gravity = 0, rotSpeed = 200,
+    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    colors = {
+        { time = 0.0,  color = Color(3.0, 0.5, 0.1, 1.0) },
+        { time = 0.5,  color = Color(0.2, 0.5, 3.0, 1.0) },
+        { time = 1.0,  color = Color(0.8, 0.1, 3.0, 0.0) },
+    },
+}
+BULLET_VFX["overload_relay"] = {
+    tex = TEX.pfx_lightning, tint = Color(3.0, 0.6, 0.1, 1), additive = true,
+    maxParticles = 8, emitRate = 26, life = 0.09,
+    sizeMin = 0.035, sizeMax = 0.065, shapeRadius = 0.03, gravity = 0, rotSpeed = 360,
+    velMin = Vector3(-0.14, -0.14, -0.14), velMax = Vector3(0.14, 0.14, 0.14),
+    colors = {
+        { time = 0.0, color = Color(3.5, 0.8, 0.1, 1.0) },
+        { time = 1.0, color = Color(1.0, 0.1, 0.0, 0.0) },
+    },
+}
+BULLET_VFX["energy_ammo"] = {
+    tex = TEX.circle, tint = Color(2.5, 2.0, 0.2, 1), additive = true,
+    maxParticles = 6, emitRate = 18, life = 0.12,
+    sizeMin = 0.020, sizeMax = 0.045, shapeRadius = 0.02, gravity = 0,
+    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
+    colors = {
+        { time = 0.0, color = Color(3.0, 2.5, 0.2, 1.0) },
+        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
+    },
+}
+BULLET_VFX["charged_hit"] = {
+    tex = TEX.pfx_light_spark, tint = Color(0.3, 0.6, 3.5, 1), additive = true,
+    maxParticles = 8, emitRate = 24, life = 0.13,
+    sizeMin = 0.025, sizeMax = 0.055, shapeRadius = 0.02, gravity = 0, rotSpeed = 150,
+    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    colors = {
+        { time = 0.0, color = Color(0.4, 0.8, 4.5, 1.0) },
+        { time = 1.0, color = Color(0.4, 0.6, 2.0, 0.0) },
+    },
+}
+BULLET_VFX["feedback_coil"] = {
+    tex = TEX.pfx_dark_swirl, tint = Color(0.8, 0.1, 2.8, 1), additive = true,
+    maxParticles = 8, emitRate = 22, life = 0.11,
+    sizeMin = 0.030, sizeMax = 0.060, shapeRadius = 0.02, gravity = 0, rotSpeed = 150,
+    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    colors = {
+        { time = 0.0, color = Color(1.0, 0.1, 3.5, 1.0) },
+        { time = 1.0, color = Color(0.3, 0.0, 1.5, 0.0) },
+    },
+}
+
+-- ============================================================================
+-- 命中爆炸 VFX 配置（一次性爆发，TTL 到期后删节点）
+-- ============================================================================
+local HIT_VFX = {}
+
+HIT_VFX["rapid_fire_module"] = {
+    tex = TEX.pfx_sparks, tint = Color(2.5, 1.8, 0.2, 1), additive = true,
+    maxParticles = 16, emitRate = 120, life = 0.18,
+    sizeMin = 0.035, sizeMax = 0.070, shapeRadius = 0.06, gravity = 0.4, rotSpeed = 240,
+    velMin = Vector3(-1.2, 0.2, -1.2), velMax = Vector3(1.2, 1.8, 1.2), ttl = 0.35,
+    colors = {
+        { time = 0.0, color = Color(3.5, 3.0, 0.4, 1.0) },
+        { time = 1.0, color = Color(0.8, 0.4, 0.0, 0.0) },
+    },
+}
+HIT_VFX["fire_seed"] = {
+    tex = TEX.pfx_fire1, tint = Color(1.5, 0.6, 0.1, 1),
+    maxParticles = 20, emitRate = 140, life = 0.45,
+    sizeMin = 0.080, sizeMax = 0.200, shapeRadius = 0.06, gravity = -0.3, rotSpeed = 90,
+    velMin = Vector3(-1.2, 0.3, -1.2), velMax = Vector3(1.2, 2.0, 1.2), ttl = 0.65,
+    colors = {
+        { time = 0.0, color = Color(2.5, 1.2, 0.1, 1.0) },
+        { time = 0.4, color = Color(2.0, 0.5, 0.0, 0.8) },
+        { time = 1.0, color = Color(0.4, 0.1, 0.0, 0.0) },
+    },
+}
+HIT_VFX["ice_crystal"] = {
+    tex = TEX.pfx_icicle, tint = Color(0.5, 0.85, 2.0, 1),
+    maxParticles = 18, emitRate = 130, life = 0.50,
+    sizeMin = 0.050, sizeMax = 0.110, shapeRadius = 0.07, gravity = 0.3, rotSpeed = 90,
+    velMin = Vector3(-1.4, 0.2, -1.4), velMax = Vector3(1.4, 1.8, 1.4), ttl = 0.70,
+    colors = {
+        { time = 0.0, color = Color(0.5, 0.9, 2.5, 1.0) },
+        { time = 1.0, color = Color(1.0, 1.2, 2.0, 0.0) },
+    },
+}
+HIT_VFX["corrosion"] = {
+    tex = TEX.pfx_toxic, tint = Color(0.3, 1.2, 0.1, 1),
+    maxParticles = 16, emitRate = 110, life = 0.55,
+    sizeMin = 0.055, sizeMax = 0.110, shapeRadius = 0.06, gravity = 1.2,
+    velMin = Vector3(-0.8, 0.2, -0.8), velMax = Vector3(0.8, 1.4, 0.8), ttl = 0.75,
+    colors = {
+        { time = 0.0, color = Color(0.3, 2.0, 0.1, 1.0) },
+        { time = 1.0, color = Color(0.1, 0.5, 0.0, 0.0) },
+    },
+}
+HIT_VFX["thunder"] = {
+    tex = TEX.pfx_eletric_exp, tint = Color(0.8, 0.3, 2.0, 1), additive = true,
+    maxParticles = 14, emitRate = 120, life = 0.20,
+    sizeMin = 0.080, sizeMax = 0.180, shapeRadius = 0.10, gravity = 0, rotSpeed = 360,
+    velMin = Vector3(-1.6, -0.8, -1.6), velMax = Vector3(1.6, 1.6, 1.6), ttl = 0.40,
+    colors = {
+        { time = 0.0, color = Color(0.8, 0.3, 3.0, 1.0) },
+        { time = 1.0, color = Color(0.5, 0.2, 1.0, 0.0) },
+    },
+}
+HIT_VFX["splinter"] = {
+    tex = TEX.pfx_rock_break, tint = Color(0.8, 0.8, 0.8, 1),
+    maxParticles = 20, emitRate = 130, life = 0.55,
+    sizeMin = 0.055, sizeMax = 0.110, shapeRadius = 0.08, gravity = 1.2, rotSpeed = 220,
+    velMin = Vector3(-1.4, 0.3, -1.4), velMax = Vector3(1.4, 2.0, 1.4), ttl = 0.70,
+    colors = {
+        { time = 0.0, color = Color(1.0, 0.95, 0.85, 1.0) },
+        { time = 1.0, color = Color(0.5, 0.45, 0.40, 0.0) },
+    },
+}
+HIT_VFX["piercing_core"] = {
+    tex = TEX.bullet_trail, tint = Color(1.5, 1.5, 2.0, 1), additive = true,
+    maxParticles = 12, emitRate = 100, life = 0.22,
+    sizeMin = 0.035, sizeMax = 0.070, shapeRadius = 0.05, gravity = 0,
+    velMin = Vector3(-1.0, 0.2, -1.0), velMax = Vector3(1.0, 1.6, 1.0), ttl = 0.40,
+    colors = {
+        { time = 0.0, color = Color(1.5, 1.5, 2.5, 1.0) },
+        { time = 1.0, color = Color(0.8, 0.8, 1.5, 0.0) },
+    },
+}
+HIT_VFX["sniper_mod"] = {
+    tex = TEX.soft_spot, tint = Color(2.0, 0.1, 0.1, 1), additive = true,
+    maxParticles = 10, emitRate = 90, life = 0.28,
+    sizeMin = 0.040, sizeMax = 0.090, shapeRadius = 0.04, gravity = 0,
+    velMin = Vector3(-0.6, 0.1, -0.6), velMax = Vector3(0.6, 1.2, 0.6), ttl = 0.45,
+    colors = {
+        { time = 0.0, color = Color(2.0, 0.1, 0.1, 0.9) },
+        { time = 1.0, color = Color(1.0, 0.1, 0.1, 0.0) },
+    },
+}
+HIT_VFX["high_explosive"] = {
+    tex = TEX.pfx_fire_meteor, tint = Color(2.0, 0.8, 0.1, 1), additive = true,
+    maxParticles = 28, emitRate = 160, life = 0.40,
+    sizeMin = 0.120, sizeMax = 0.280, shapeRadius = 0.12, gravity = 0, rotSpeed = 140,
+    velMin = Vector3(-1.8, -0.5, -1.8), velMax = Vector3(1.8, 2.5, 1.8), ttl = 0.75,
+    colors = {
+        { time = 0.0, color = Color(3.0, 2.0, 0.2, 1.0) },
+        { time = 0.3, color = Color(2.5, 0.8, 0.0, 0.8) },
+        { time = 1.0, color = Color(0.5, 0.2, 0.1, 0.0) },
+    },
+}
+HIT_VFX["crit_device"] = {
+    tex = TEX.pfx_star_shine, tint = Color(3.0, 2.5, 0.2, 1), additive = true,
+    maxParticles = 14, emitRate = 110, life = 0.50,
+    sizeMin = 0.060, sizeMax = 0.140, shapeRadius = 0.06, gravity = 0, rotSpeed = 180,
+    velMin = Vector3(-1.2, 0.2, -1.2), velMax = Vector3(1.2, 2.0, 1.2), ttl = 0.70,
+    colors = {
+        { time = 0.0, color = Color(4.0, 3.5, 0.3, 1.0) },
+        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
+    },
+}
+HIT_VFX["elemental_core"] = {
+    tex = TEX.pfx_eletric_aura, additive = true,
+    maxParticles = 16, emitRate = 120, life = 0.35,
+    sizeMin = 0.070, sizeMax = 0.150, shapeRadius = 0.08, gravity = 0, rotSpeed = 200,
+    velMin = Vector3(-1.4, -0.4, -1.4), velMax = Vector3(1.4, 1.4, 1.4), ttl = 0.60,
+    colors = {
+        { time = 0.0,  color = Color(3.0, 0.5, 0.1, 1.0) },
+        { time = 0.33, color = Color(0.2, 0.5, 3.0, 1.0) },
+        { time = 0.67, color = Color(0.8, 0.1, 3.0, 1.0) },
+        { time = 1.0,  color = Color(0.2, 2.5, 0.2, 0.0) },
+    },
+}
+HIT_VFX["overload_relay"] = {
+    tex = TEX.pfx_eletric_exp, tint = Color(3.0, 0.6, 0.1, 1), additive = true,
+    maxParticles = 14, emitRate = 120, life = 0.22,
+    sizeMin = 0.075, sizeMax = 0.160, shapeRadius = 0.10, gravity = 0, rotSpeed = 360,
+    velMin = Vector3(-1.8, -1.0, -1.8), velMax = Vector3(1.8, 1.8, 1.8), ttl = 0.45,
+    colors = {
+        { time = 0.0, color = Color(3.5, 0.8, 0.1, 1.0) },
+        { time = 1.0, color = Color(1.0, 0.1, 0.0, 0.0) },
+    },
+}
+HIT_VFX["energy_ammo"] = {
+    tex = TEX.circle, tint = Color(2.5, 2.0, 0.2, 1), additive = true,
+    maxParticles = 12, emitRate = 100, life = 0.32,
+    sizeMin = 0.050, sizeMax = 0.100, shapeRadius = 0.06, gravity = 0,
+    velMin = Vector3(-1.0, 0.1, -1.0), velMax = Vector3(1.0, 1.6, 1.0), ttl = 0.55,
+    colors = {
+        { time = 0.0, color = Color(3.0, 2.5, 0.2, 1.0) },
+        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
+    },
+}
+HIT_VFX["charged_hit"] = {
+    tex = TEX.pfx_light_spark, tint = Color(0.3, 0.6, 3.5, 1), additive = true,
+    maxParticles = 16, emitRate = 120, life = 0.40,
+    sizeMin = 0.060, sizeMax = 0.130, shapeRadius = 0.08, gravity = -0.2, rotSpeed = 150,
+    velMin = Vector3(-1.4, 0.2, -1.4), velMax = Vector3(1.4, 2.2, 1.4), ttl = 0.65,
+    colors = {
+        { time = 0.0, color = Color(0.4, 0.8, 4.5, 1.0) },
+        { time = 1.0, color = Color(0.4, 0.6, 2.0, 0.0) },
+    },
+}
+HIT_VFX["feedback_coil"] = {
+    tex = TEX.pfx_dark_swirl, tint = Color(0.8, 0.1, 2.8, 1), additive = true,
+    maxParticles = 16, emitRate = 120, life = 0.45,
+    sizeMin = 0.070, sizeMax = 0.150, shapeRadius = 0.10, gravity = 0, rotSpeed = 150,
+    velMin = Vector3(-1.6, -0.3, -1.6), velMax = Vector3(1.6, 1.6, 1.6), ttl = 0.70,
+    colors = {
+        { time = 0.0, color = Color(1.0, 0.1, 3.5, 1.0) },
+        { time = 1.0, color = Color(0.3, 0.0, 1.5, 0.0) },
+    },
+}
+
+-- 命中特效待清理队列: { {node=Node, ttl=number}, ... }
+local pendingRemovals = {}
+
+--- 在飞行子弹上附加拖尾特效（子弹销毁时自动随节点消失）
+--- @param projNode Node
+--- @param artifactId string
+function M.SpawnBulletVFX(projNode, artifactId)
+    local cfg = BULLET_VFX[artifactId]
+    if not cfg or not projNode then return end
+    local ok, err = pcall(CreateParticleNode, projNode, cfg)
+    if not ok then
+        print(string.format("[ArtifactVFX] SpawnBulletVFX error (%s): %s", artifactId, tostring(err)))
+    end
+end
+
+--- 在命中位置生成一次性爆发特效（TTL 后自动删除节点）
+--- @param scene Scene
+--- @param hitPos Vector3
+--- @param artifactId string
+function M.SpawnHitVFX(scene, hitPos, artifactId)
+    local cfg = HIT_VFX[artifactId]
+    if not cfg or not scene then return end
+    local ok, err = pcall(function()
+        local node = scene:CreateChild("HitVFX_" .. artifactId)
+        node.position = hitPos
+        local oneShotCfg = {}
+        for k, v in pairs(cfg) do oneShotCfg[k] = v end
+        oneShotCfg.emitting = true
+        CreateParticleNode(node, oneShotCfg)
+        -- 停止继续发射（让现有粒子淡出）—— 延迟到下一帧通过 pendingRemovals 处理
+        table.insert(pendingRemovals, { node = node, ttl = cfg.ttl or 0.8 })
+    end)
+    if not ok then
+        print(string.format("[ArtifactVFX] SpawnHitVFX error (%s): %s", artifactId, tostring(err)))
+    end
+end
+
 --- 每帧更新
 function M.Update(dt)
     for _, tower in ipairs(require("Config").GS.towers) do
@@ -1436,6 +1804,23 @@ function M.Update(dt)
                     require("Config").CONFIG.MaxActiveEnergy or 100
                 )
             end
+        end
+    end
+    -- 清理已超时的命中特效节点
+    local i = 1
+    while i <= #pendingRemovals do
+        local entry = pendingRemovals[i]
+        entry.ttl = entry.ttl - dt
+        if entry.ttl <= 0 then
+            if entry.node then
+                -- 先停止发射，让粒子自然淡出后再移除
+                local em = entry.node:GetComponent("ParticleEmitter")
+                if em then em:SetEmitting(false) end
+                entry.node:Remove()
+            end
+            table.remove(pendingRemovals, i)
+        else
+            i = i + 1
         end
     end
 end
