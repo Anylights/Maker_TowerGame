@@ -15,6 +15,36 @@ local function GetArtVFX()
     return require("ArtifactVFX")
 end
 
+-- 基础塔子弹 RibbonTrail 拖尾（无圣器时的默认效果）
+local function CreateBasicBulletTrail(projNode)
+    -- 拖尾挂在子弹节点子节点上，避免缩放影响拖尾宽度
+    local trailNode = projNode:CreateChild("BulletTrail")
+
+    -- 拖尾材质：加法混合，黑色像素透明
+    local mat = Material:new()
+    local tech = cache:GetResource("Technique", "Techniques/DiffAdd.xml")
+    if tech then mat:SetTechnique(0, tech) end
+    -- 使用软光晕贴图让拖尾更饱满
+    local tex = cache:GetResource("Texture2D", "PolygonParticles/Textures/PolygonParticles_Soft_Spot.png")
+    if tex then mat:SetTexture(TU_DIFFUSE, tex) end
+
+    local trail = trailNode:CreateComponent("RibbonTrail")
+    trail:SetMaterial(mat)
+    trail:SetTrailType(TT_FACE_CAMERA)
+    -- 球直径约 0.13m（ProjectileSize=0.15 / 0.28 * model尺寸）
+    trail:SetWidth(0.13)
+    -- 速度12m/s × lifetime0.07s ≈ 0.84m 拖尾，不会延伸回塔
+    trail:SetVertexDistance(0.025)
+    trail:SetLifetime(0.07)
+    -- 头部半透明暖黄，尾部完全透明
+    trail:SetStartColor(Color(1.0, 0.88, 0.45, 0.65))
+    trail:SetEndColor(Color(0.9, 0.45, 0.1, 0.0))
+    trail:SetStartScale(1.0)
+    trail:SetEndScale(0.15)
+    trail:SetSorted(true)
+    trail:SetEmitting(true)
+end
+
 -- 遍历塔身上装备的圣器，在子弹节点上生成拖尾特效
 local function ApplyBulletVFX(tower, projNode)
     if not tower or not tower.slots or not projNode then return end
@@ -449,6 +479,9 @@ function M.FireProjectile(tower, targetMonster, dmg)
     model:SetModel(cache:GetResource("Model", "Meshes/TD/weapon-ammo-cannonball.mdl"))
     model:SetMaterial(cache:GetResource("Material", "Materials/TD/weapon-ammo-cannonball_00_colormap.xml"))
 
+    -- 基础拖尾（始终存在，不依赖圣器）
+    CreateBasicBulletTrail(node)
+
     local pierceCount = tower.artPierceCount or 0
     local proj = {
         node = node,
@@ -461,7 +494,7 @@ function M.FireProjectile(tower, targetMonster, dmg)
         pierceHit  = {},            -- 已命中过的怪物 set {monster = true}
     }
     table.insert(GS.projectiles, proj)
-    -- 圣器子弹拖尾特效
+    -- 圣器子弹拖尾特效（叠加在基础拖尾上）
     ApplyBulletVFX(tower, node)
 end
 
