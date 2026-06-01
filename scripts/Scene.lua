@@ -7,6 +7,7 @@ local CONFIG = Cfg.CONFIG
 local MOEBIUS = Cfg.MOEBIUS
 local GS = Cfg.GS
 local EnergyTower -- lazy require to avoid circular dependency
+local PathRenderer = require("PathRenderer")
 
 local M = {}
 
@@ -557,6 +558,35 @@ function M.UpdateUpgradeHint(dt)
     else
         upgradeHintNode_.enabled = false
     end
+end
+
+-- ============================================================================
+-- 关卡路径渲染（由 Wave.lua 在新关卡开始时调用）
+-- ============================================================================
+
+--- 渲染当前关卡的路径地块
+---@param levelData table|nil 关卡数据 (来自 LevelData)，nil 则清除
+function M.RenderLevelPaths(levelData)
+    print("[Scene] RenderLevelPaths called!")
+    if not levelData then
+        PathRenderer.Clear()
+        print("[Scene] levelData is nil, clearing paths")
+        return
+    end
+
+    local ok, err = pcall(function()
+        PathRenderer.RenderPaths(levelData)
+    end)
+    if not ok then
+        print("[Scene] ERROR in PathRenderer.RenderPaths: " .. tostring(err))
+    else
+        print("[Scene] PathRenderer.RenderPaths completed successfully")
+    end
+end
+
+--- 清除路径渲染
+function M.ClearLevelPaths()
+    PathRenderer.Clear()
 end
 
 return M

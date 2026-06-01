@@ -113,13 +113,13 @@ M.CONFIG = {
     CostLinear = 8,
     CostQuad = 2,
     -- 视觉
-    GridY = 0.02,
+    GridY = 0.13,
     HoverY = 0.04,
     LineWidth = 0.18,
     EnergyLineY = 0.06,
     -- 怪物
     MonsterHP = 80,
-    MonsterSpeed = 1.8,
+    MonsterSpeed = 1.2,            -- 关卡制: 怪物更慢 (原 1.8)
     MonsterSize = 0.38,
     SpawnInterval = 2.5,
     SpawnDistance = 18,

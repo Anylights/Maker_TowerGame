@@ -56,104 +56,258 @@ local function BuildMonsterVisuals(node, typeDef, monsterType, isElite)
     end
 
     if monsterType == "walker" then
-        -- 行尸: 圆滚躯干 + 小头 + 僵尸前伸双臂
-        Part("Body", "Models/Sphere.mdl",   bodyMat, 0, 0.55, 0,    0.88, 0.82, 0.88)
-        Part("Head", "Models/Sphere.mdl",   bodyMat, 0, 1.13, 0.08, 0.50, 0.50, 0.50)
-        Part("ArmL", "Models/Cylinder.mdl", bodyMat, -0.48, 0.88, 0.28, 0.17, 0.55, 0.17, Quaternion(-65, 0, -18))
-        Part("ArmR", "Models/Cylinder.mdl", bodyMat,  0.48, 0.88, 0.28, 0.17, 0.55, 0.17, Quaternion(-65, 0,  18))
+        -- 行尸: 椭球躯干 + 驼背头 + 僵尸前伸长臂 + 短腿 + 发光眼
+        Part("Body", "Models/Sphere.mdl",   bodyMat, 0, 0.52, 0,    0.92, 0.78, 0.85)
+        Part("Hump", "Models/Sphere.mdl",   bodyMat, 0, 0.88, -0.12, 0.48, 0.38, 0.45)  -- 驼背隆起
+        Part("Head", "Models/Sphere.mdl",   bodyMat, 0, 1.08, 0.15, 0.48, 0.46, 0.48)
+        Part("ArmL", "Models/Cylinder.mdl", bodyMat, -0.50, 0.82, 0.35, 0.14, 0.62, 0.14, Quaternion(-70, 0, -20))
+        Part("ArmR", "Models/Cylinder.mdl", bodyMat,  0.50, 0.82, 0.35, 0.14, 0.62, 0.14, Quaternion(-70, 0,  20))
+        Part("ClawL", "Models/Cone.mdl",    bodyMat, -0.50, 0.55, 0.72, 0.10, 0.18, 0.10, Quaternion(90, Vector3.RIGHT))  -- 爪
+        Part("ClawR", "Models/Cone.mdl",    bodyMat,  0.50, 0.55, 0.72, 0.10, 0.18, 0.10, Quaternion(90, Vector3.RIGHT))
+        Part("LegL", "Models/Cylinder.mdl", bodyMat, -0.28, 0.18, 0, 0.16, 0.34, 0.16)
+        Part("LegR", "Models/Cylinder.mdl", bodyMat,  0.28, 0.18, 0, 0.16, 0.34, 0.16)
+        -- 暗红发光眼
+        local em = EyeMat(1.0, 0.15, 0.1, 2.8, 0.4, 0.2)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.14, 1.14, 0.38, 0.10, 0.08, 0.08)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.14, 1.14, 0.38, 0.10, 0.08, 0.08)
 
     elseif monsterType == "swarm" then
-        -- 群虫: 扁平圆盘 + 6根放射刺腿
-        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.22, 0, 1.30, 0.40, 1.30)
-        for i = 0, 5 do
-            local rad = math.rad(i * 60)
+        -- 群虫: 分段甲虫体 + 8根放射刺腿 + 触角 + 发光复眼
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.22, 0, 1.20, 0.38, 1.20)
+        -- 腹部分段
+        local segMat = bodyMat:Clone()
+        segMat:SetShaderParameter("MatDiffColor", Variant(Color(c.r*0.7, c.g*0.8, c.b*0.6, 1)))
+        segMat:SetShaderParameter("Metallic", Variant(0.25))
+        segMat:SetShaderParameter("Roughness", Variant(0.55))
+        Part("Seg1", "Models/Sphere.mdl", segMat, 0, 0.22, -0.38, 0.55, 0.30, 0.48)
+        Part("Seg2", "Models/Sphere.mdl", segMat, 0, 0.20, -0.72, 0.38, 0.24, 0.35)
+        -- 8根刺腿（更多更密）
+        for i = 0, 7 do
+            local rad = math.rad(i * 45)
             Part("Leg"..i, "Models/Cone.mdl", bodyMat,
-                math.sin(rad)*0.72, 0.12, math.cos(rad)*0.72,
-                0.13, 0.52, 0.13,
-                Quaternion(i*60, Vector3.UP) * Quaternion(55, Vector3.RIGHT))
+                math.sin(rad)*0.68, 0.10, math.cos(rad)*0.68,
+                0.10, 0.48, 0.10,
+                Quaternion(i*45, Vector3.UP) * Quaternion(60, Vector3.RIGHT))
         end
+        -- 触角
+        Part("AntL", "Models/Cylinder.mdl", bodyMat, -0.18, 0.34, 0.55, 0.04, 0.36, 0.04, Quaternion(-30, Vector3.RIGHT) * Quaternion(-15, Vector3.FORWARD))
+        Part("AntR", "Models/Cylinder.mdl", bodyMat,  0.18, 0.34, 0.55, 0.04, 0.36, 0.04, Quaternion(-30, Vector3.RIGHT) * Quaternion(15, Vector3.FORWARD))
+        -- 发光绿色复眼
+        local em = EyeMat(0.4, 1.0, 0.2, 0.8, 2.8, 0.4)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.22, 0.30, 0.50, 0.12, 0.10, 0.10)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.22, 0.30, 0.50, 0.12, 0.10, 0.10)
 
     elseif monsterType == "shellbeast" then
-        -- 甲壳兽: 宽扁方形躯干 + 深色隆起背甲 + 小头
-        Part("Body", "Models/Box.mdl", bodyMat, 0, 0.38, 0, 1.10, 0.62, 1.38)
+        -- 甲壳兽: 宽扁躯干 + 多层背甲 + 前角 + 短粗腿 + 琥珀色眼
+        Part("Body", "Models/Box.mdl", bodyMat, 0, 0.36, 0, 1.10, 0.58, 1.38)
+        -- 深色金属背甲（分层叠加）
         local shellMat = bodyMat:Clone()
-        shellMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r*0.65, c.g*0.55, c.b*0.40, 1)))
-        shellMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*0.4, baseEmitG*0.4, baseEmitB*0.3)))
-        shellMat:SetShaderParameter("Metallic",  Variant(0.35))
-        shellMat:SetShaderParameter("Roughness", Variant(0.40))
-        Part("Shell", "Models/Sphere.mdl", shellMat, 0, 0.80, -0.08, 1.18, 0.68, 1.32)
-        Part("Head",  "Models/Sphere.mdl", bodyMat,  0, 0.54,  0.77, 0.44, 0.42, 0.44)
+        shellMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r*0.55, c.g*0.45, c.b*0.30, 1)))
+        shellMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*0.5, baseEmitG*0.4, baseEmitB*0.3)))
+        shellMat:SetShaderParameter("Metallic",  Variant(0.55))
+        shellMat:SetShaderParameter("Roughness", Variant(0.30))
+        Part("Shell1", "Models/Sphere.mdl", shellMat, 0, 0.78, -0.12, 1.22, 0.52, 1.35)
+        Part("Shell2", "Models/Sphere.mdl", shellMat, 0, 0.92, -0.18, 0.90, 0.38, 1.00)  -- 上层小甲
+        -- 前端尖角
+        Part("HornL", "Models/Cone.mdl", shellMat, -0.32, 0.62, 0.72, 0.10, 0.28, 0.10, Quaternion(70, Vector3.RIGHT))
+        Part("HornR", "Models/Cone.mdl", shellMat,  0.32, 0.62, 0.72, 0.10, 0.28, 0.10, Quaternion(70, Vector3.RIGHT))
+        -- 小头
+        Part("Head", "Models/Sphere.mdl", bodyMat, 0, 0.50, 0.78, 0.42, 0.38, 0.42)
+        -- 4条短粗腿
+        for i, lp in ipairs({{-0.42,0.14,0.35},{0.42,0.14,0.35},{-0.42,0.14,-0.35},{0.42,0.14,-0.35}}) do
+            Part("Leg"..i, "Models/Cylinder.mdl", bodyMat, lp[1],lp[2],lp[3], 0.18,0.28,0.18)
+        end
+        -- 琥珀色小眼
+        local em = EyeMat(1.0, 0.7, 0.1, 2.2, 1.5, 0.2)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.12, 0.58, 0.92, 0.08, 0.07, 0.07)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.12, 0.58, 0.92, 0.08, 0.07, 0.07)
 
     elseif monsterType == "sprinter" then
-        -- 疾行者: 流线型椭球 + 尖锥鼻 + 4条细腿
-        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.44, 0,    0.62, 0.58, 1.38)
-        Part("Nose", "Models/Cone.mdl",   bodyMat, 0, 0.44, 0.90, 0.26, 0.52, 0.26, Quaternion(90, Vector3.RIGHT))
-        for i, lp in ipairs({{-0.36,0.18,0.32},{0.36,0.18,0.32},{-0.36,0.18,-0.32},{0.36,0.18,-0.32}}) do
-            Part("Leg"..i, "Models/Cylinder.mdl", bodyMat, lp[1],lp[2],lp[3], 0.11,0.42,0.11)
+        -- 疾行者: 流线型椭球 + 尖锥头 + 背鳍 + 尾锥 + 4细腿 + 冰蓝眼
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.42, 0, 0.60, 0.52, 1.42)
+        Part("Nose", "Models/Cone.mdl",   bodyMat, 0, 0.42, 0.95, 0.22, 0.48, 0.22, Quaternion(90, Vector3.RIGHT))
+        -- 背鳍（3个从大到小）
+        local finMat = bodyMat:Clone()
+        finMat:SetShaderParameter("MatDiffColor", Variant(Color(c.r*0.8, c.g*0.9, c.b*1.2, 1)))
+        finMat:SetShaderParameter("Metallic", Variant(0.40))
+        finMat:SetShaderParameter("Roughness", Variant(0.35))
+        Part("Fin1", "Models/Cone.mdl", finMat, 0, 0.72, -0.10, 0.06, 0.28, 0.12, Quaternion(0,0,0))
+        Part("Fin2", "Models/Cone.mdl", finMat, 0, 0.66, -0.35, 0.05, 0.22, 0.10, Quaternion(0,0,0))
+        Part("Fin3", "Models/Cone.mdl", finMat, 0, 0.60, -0.55, 0.04, 0.16, 0.08, Quaternion(0,0,0))
+        -- 尾锥
+        Part("Tail", "Models/Cone.mdl", bodyMat, 0, 0.40, -0.90, 0.15, 0.35, 0.15, Quaternion(-90, Vector3.RIGHT))
+        -- 4条修长腿
+        for i, lp in ipairs({{-0.32,0.16,0.30},{0.32,0.16,0.30},{-0.32,0.16,-0.30},{0.32,0.16,-0.30}}) do
+            Part("Leg"..i, "Models/Cylinder.mdl", bodyMat, lp[1],lp[2],lp[3], 0.09,0.38,0.09)
         end
+        -- 冰蓝发光眼
+        local em = EyeMat(0.3, 0.8, 1.0, 0.5, 2.0, 3.5)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.16, 0.50, 0.62, 0.09, 0.07, 0.07)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.16, 0.50, 0.62, 0.09, 0.07, 0.07)
 
     elseif monsterType == "shielded" then
-        -- 护盾怪: 圆球身体 + 圆周尖刺 + 发光双眼
-        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.55, 0, 0.92, 0.88, 0.92)
-        for i = 0, 5 do
-            local rad = math.rad(i * 60)
-            Part("Sp"..i, "Models/Cone.mdl", bodyMat,
-                math.sin(rad)*0.90, 0.55 + math.cos(rad)*0.88*0.22, math.cos(rad)*0.90,
-                0.11, 0.34, 0.11,
-                Quaternion(i*60, Vector3.UP) * Quaternion(-90, Vector3.RIGHT))
+        -- 护盾怪: 核心球 + 内部光核 + 8根尖刺 + 赤道环 + 紫色发光眼
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.55, 0, 0.88, 0.84, 0.88)
+        -- 内核发光球
+        local coreMat = Material:new()
+        coreMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+        coreMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r*0.5, c.g*0.3, c.b*0.6, 1)))
+        coreMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*2.5, baseEmitG*2.0, baseEmitB*3.0)))
+        coreMat:SetShaderParameter("Metallic",  Variant(0.0))
+        coreMat:SetShaderParameter("Roughness", Variant(0.2))
+        Part("Core", "Models/Sphere.mdl", coreMat, 0, 0.55, 0, 0.42, 0.42, 0.42)
+        -- 8根尖刺（上下左右+斜向）
+        local spikeMat = bodyMat:Clone()
+        spikeMat:SetShaderParameter("Metallic", Variant(0.45))
+        spikeMat:SetShaderParameter("Roughness", Variant(0.35))
+        for i = 0, 7 do
+            local rad = math.rad(i * 45)
+            local yOff = (i % 2 == 0) and 0.10 or -0.08
+            Part("Sp"..i, "Models/Cone.mdl", spikeMat,
+                math.sin(rad)*0.88, 0.55 + yOff, math.cos(rad)*0.88,
+                0.09, 0.38, 0.09,
+                Quaternion(i*45, Vector3.UP) * Quaternion(-90, Vector3.RIGHT))
         end
-        local em = EyeMat(0.9,0.85,1.0, 1.8,1.5,3.2)
-        Part("EyeL", "Models/Sphere.mdl", em, -0.22, 0.66, 0.43, 0.14,0.14,0.14)
-        Part("EyeR", "Models/Sphere.mdl", em,  0.22, 0.66, 0.43, 0.14,0.14,0.14)
+        -- 赤道金属环
+        local ringMat = bodyMat:Clone()
+        ringMat:SetShaderParameter("MatDiffColor", Variant(Color(c.r*0.6, c.g*0.4, c.b*0.7, 1)))
+        ringMat:SetShaderParameter("Metallic", Variant(0.70))
+        ringMat:SetShaderParameter("Roughness", Variant(0.20))
+        Part("Ring", "Models/Torus.mdl", ringMat, 0, 0.55, 0, 1.10, 0.10, 1.10)
+        -- 紫色发光大眼
+        local em = EyeMat(0.9, 0.6, 1.0, 2.2, 1.2, 4.0)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.22, 0.66, 0.42, 0.14, 0.13, 0.12)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.22, 0.66, 0.42, 0.14, 0.13, 0.12)
 
     elseif monsterType == "energy_devourer" then
-        -- 吞能者: 球形核心 + 倾斜轨道环 + 黄色双眼
-        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.50, 0, 0.88,0.88,0.88)
+        -- 吞能者: 球形核心 + 能量裂纹 + 双轨道环 + 4触手 + 金色大眼
+        Part("Body", "Models/Sphere.mdl", bodyMat, 0, 0.50, 0, 0.85, 0.85, 0.85)
+        -- 内核（高发光，模拟能量积蓄）
+        local innerMat = Material:new()
+        innerMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+        innerMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r*1.2, c.g*1.1, c.b*0.2, 1)))
+        innerMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*3.0, baseEmitG*2.8, baseEmitB*0.8)))
+        innerMat:SetShaderParameter("Metallic",  Variant(0.0))
+        innerMat:SetShaderParameter("Roughness", Variant(0.15))
+        Part("Inner", "Models/Sphere.mdl", innerMat, 0, 0.50, 0, 0.40, 0.40, 0.40)
+        -- 双轨道环（不同倾角）
         local orbitMat = Material:new()
         orbitMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
         orbitMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r, c.g, c.b, 0.72)))
-        orbitMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*2.2, baseEmitG*2.2, baseEmitB*2.2)))
+        orbitMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*2.5, baseEmitG*2.5, baseEmitB*1.5)))
         orbitMat:SetShaderParameter("Metallic",  Variant(0.85))
-        orbitMat:SetShaderParameter("Roughness", Variant(0.15))
-        Part("Orbit", "Models/Torus.mdl", orbitMat, 0,0.50,0, 1.42,0.16,1.42, Quaternion(50, Vector3.RIGHT))
-        local em = EyeMat(1.0,0.9,0.2, 3.0,2.5,0.5)
-        Part("EyeL", "Models/Sphere.mdl", em, -0.20,0.62,0.40, 0.15,0.15,0.15)
-        Part("EyeR", "Models/Sphere.mdl", em,  0.20,0.62,0.40, 0.15,0.15,0.15)
+        orbitMat:SetShaderParameter("Roughness", Variant(0.12))
+        Part("Orbit1", "Models/Torus.mdl", orbitMat, 0, 0.50, 0, 1.38, 0.14, 1.38, Quaternion(50, Vector3.RIGHT))
+        Part("Orbit2", "Models/Torus.mdl", orbitMat, 0, 0.50, 0, 1.22, 0.12, 1.22, Quaternion(-30, Vector3.FORWARD))
+        -- 4条能量触手（锥体模拟）
+        for i = 0, 3 do
+            local rad = math.rad(i * 90 + 20)
+            Part("Tend"..i, "Models/Cone.mdl", bodyMat,
+                math.sin(rad)*0.52, 0.22, math.cos(rad)*0.52,
+                0.08, 0.35, 0.08,
+                Quaternion(i*90+20, Vector3.UP) * Quaternion(120, Vector3.RIGHT))
+        end
+        -- 金色发光大眼
+        local em = EyeMat(1.0, 0.9, 0.2, 3.5, 2.8, 0.5)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.20, 0.62, 0.40, 0.16, 0.15, 0.14)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.20, 0.62, 0.40, 0.16, 0.15, 0.14)
 
     elseif monsterType == "shatter_titan" then
-        -- 裂山巨像 Boss: 方形巨躯 + 宽肩 + 球头 + 粗腿 + 橙色眼
-        Part("Torso",    "Models/Box.mdl",    bodyMat, 0,0.68,0,  1.38,1.18,1.08)
-        Part("Shoulder", "Models/Box.mdl",    bodyMat, 0,1.28,0,  1.92,0.28,0.88)
-        Part("Head",     "Models/Sphere.mdl", bodyMat, 0,1.75,0,  0.82,0.82,0.82)
-        for i, lp in ipairs({{-0.48,0.20,0.30},{0.48,0.20,0.30},{-0.48,0.20,-0.30},{0.48,0.20,-0.30}}) do
-            Part("Leg"..i, "Models/Cylinder.mdl", bodyMat, lp[1],lp[2],lp[3], 0.34,0.52,0.34)
+        -- 裂山巨像 Boss: 巨型方形躯干 + 护甲肩板 + 重型拳头 + 腰带 + 角盔头 + 粗腿 + 橙红眼
+        -- 主躯干
+        Part("Torso", "Models/Box.mdl", bodyMat, 0, 0.70, 0, 1.42, 1.22, 1.12)
+        -- 护甲肩板（金属质感）
+        local armorMat = bodyMat:Clone()
+        armorMat:SetShaderParameter("MatDiffColor", Variant(Color(c.r*0.6, c.g*0.5, c.b*0.4, 1)))
+        armorMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*0.6, baseEmitG*0.5, baseEmitB*0.3)))
+        armorMat:SetShaderParameter("Metallic", Variant(0.65))
+        armorMat:SetShaderParameter("Roughness", Variant(0.25))
+        Part("ShoulderL", "Models/Box.mdl", armorMat, -0.88, 1.30, 0, 0.52, 0.35, 0.92)
+        Part("ShoulderR", "Models/Box.mdl", armorMat,  0.88, 1.30, 0, 0.52, 0.35, 0.92)
+        Part("Belt", "Models/Box.mdl", armorMat, 0, 0.20, 0, 1.50, 0.18, 1.18)  -- 腰带
+        -- 重型拳头
+        Part("FistL", "Models/Sphere.mdl", armorMat, -1.02, 0.55, 0.25, 0.38, 0.36, 0.38)
+        Part("FistR", "Models/Sphere.mdl", armorMat,  1.02, 0.55, 0.25, 0.38, 0.36, 0.38)
+        -- 球头 + 双角
+        Part("Head", "Models/Sphere.mdl", bodyMat, 0, 1.78, 0, 0.80, 0.78, 0.80)
+        Part("HornL", "Models/Cone.mdl", armorMat, -0.28, 2.12, -0.08, 0.12, 0.35, 0.12, Quaternion(-15, Vector3.FORWARD))
+        Part("HornR", "Models/Cone.mdl", armorMat,  0.28, 2.12, -0.08, 0.12, 0.35, 0.12, Quaternion(15, Vector3.FORWARD))
+        -- 4条粗腿
+        for i, lp in ipairs({{-0.50,0.18,0.32},{0.50,0.18,0.32},{-0.50,0.18,-0.32},{0.50,0.18,-0.32}}) do
+            Part("Leg"..i, "Models/Cylinder.mdl", bodyMat, lp[1],lp[2],lp[3], 0.36, 0.50, 0.36)
         end
-        local em = EyeMat(1.0,0.55,0.1, 3.2,1.6,0.3)
-        Part("EyeL", "Models/Sphere.mdl", em, -0.22,1.83,0.40, 0.18,0.18,0.18)
-        Part("EyeR", "Models/Sphere.mdl", em,  0.22,1.83,0.40, 0.18,0.18,0.18)
+        -- 橙红炽热发光眼
+        local em = EyeMat(1.0, 0.45, 0.1, 4.0, 1.8, 0.3)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.22, 1.86, 0.38, 0.18, 0.16, 0.15)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.22, 1.86, 0.38, 0.18, 0.16, 0.15)
 
     elseif monsterType == "line_devourer" then
-        -- 吞线母体 Boss: 巨型球核 + 三重轨道环 + 四卫星 + 紫眼
-        Part("Core", "Models/Sphere.mdl", bodyMat, 0,0.88,0, 1.62,1.62,1.62)
+        -- 吞线母体 Boss: 巨型球核 + 内核光球 + 三重轨道环 + 6卫星 + 8能量触须 + 脊柱冠 + 紫色巨眼
+        Part("Core", "Models/Sphere.mdl", bodyMat, 0, 0.88, 0, 1.62, 1.62, 1.62)
+
+        -- 内部能量核心（强发光）
+        local innerMat = Material:new()
+        innerMat:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTexture.xml"))
+        innerMat:SetShaderParameter("MatDiffColor",    Variant(Color(c.r*1.5, c.g*0.6, c.b*1.8, 1)))
+        innerMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*4.0, baseEmitG*2.0, baseEmitB*5.0)))
+        innerMat:SetShaderParameter("Metallic",  Variant(0.0))
+        innerMat:SetShaderParameter("Roughness", Variant(0.10))
+        Part("Inner", "Models/Sphere.mdl", innerMat, 0, 0.88, 0, 0.65, 0.65, 0.65)
+
+        -- 三重轨道环（不同角度、尺寸递减）
         local ringRots   = { Quaternion(0,0,0), Quaternion(60,Vector3.RIGHT), Quaternion(-50,Vector3.FORWARD) }
-        local ringAlphas = { 0.65, 0.50, 0.40 }
+        local ringScales = { 2.15, 1.85, 1.55 }
+        local ringAlphas = { 0.72, 0.55, 0.42 }
         for i, rq in ipairs(ringRots) do
             local rm = Material:new()
             rm:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
-            rm:SetShaderParameter("MatDiffColor",    Variant(Color(c.r,c.g,c.b, ringAlphas[i])))
-            rm:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*1.6, baseEmitG*1.6, baseEmitB*1.6)))
-            rm:SetShaderParameter("Metallic",  Variant(0.75))
-            rm:SetShaderParameter("Roughness", Variant(0.18))
-            Part("Ring"..i, "Models/Torus.mdl", rm, 0,0.88,0, 2.05,0.17,2.05, rq)
+            rm:SetShaderParameter("MatDiffColor",    Variant(Color(c.r, c.g, c.b, ringAlphas[i])))
+            rm:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*2.2, baseEmitG*1.8, baseEmitB*2.8)))
+            rm:SetShaderParameter("Metallic",  Variant(0.80))
+            rm:SetShaderParameter("Roughness", Variant(0.12))
+            Part("Ring"..i, "Models/Torus.mdl", rm, 0, 0.88, 0, ringScales[i], 0.18, ringScales[i], rq)
         end
-        for i = 0, 3 do
-            local rad = math.rad(i*90 + 45)
+
+        -- 6 卫星球（围绕核心，交替高低）
+        for i = 0, 5 do
+            local rad = math.rad(i * 60 + 30)
+            local yOff = (i % 2 == 0) and 0.15 or -0.12
             Part("Sat"..i, "Models/Sphere.mdl", bodyMat,
-                math.sin(rad)*1.48, 0.88, math.cos(rad)*1.48, 0.34,0.34,0.34)
+                math.sin(rad)*1.55, 0.88 + yOff, math.cos(rad)*1.55, 0.32, 0.32, 0.32)
         end
-        local em = EyeMat(0.85,0.25,1.0, 2.5,0.5,4.2)
-        Part("EyeL", "Models/Sphere.mdl", em, -0.40,1.06,0.78, 0.25,0.25,0.25)
-        Part("EyeR", "Models/Sphere.mdl", em,  0.40,1.06,0.78, 0.25,0.25,0.25)
+
+        -- 8 根能量触须（向下延伸，从核心底部放射）
+        local tendMat = bodyMat:Clone()
+        tendMat:SetShaderParameter("MatDiffColor", Variant(Color(c.r*0.7, c.g*0.4, c.b*0.9, 1)))
+        tendMat:SetShaderParameter("MatEmissiveColor", Variant(Color(baseEmitR*1.8, baseEmitG*1.0, baseEmitB*2.5)))
+        tendMat:SetShaderParameter("Metallic", Variant(0.30))
+        tendMat:SetShaderParameter("Roughness", Variant(0.45))
+        for i = 0, 7 do
+            local rad = math.rad(i * 45)
+            Part("Tend"..i, "Models/Cone.mdl", tendMat,
+                math.sin(rad)*0.72, 0.18, math.cos(rad)*0.72,
+                0.10, 0.52, 0.10,
+                Quaternion(i*45, Vector3.UP) * Quaternion(135, Vector3.RIGHT))
+        end
+
+        -- 脊柱冠（顶部向上的尖刺，像王冠）
+        local spineMat = bodyMat:Clone()
+        spineMat:SetShaderParameter("MatDiffColor", Variant(Color(c.r*0.5, c.g*0.3, c.b*0.7, 1)))
+        spineMat:SetShaderParameter("Metallic", Variant(0.60))
+        spineMat:SetShaderParameter("Roughness", Variant(0.22))
+        for i = 0, 5 do
+            local rad = math.rad(i * 60)
+            local h = (i % 2 == 0) and 0.42 or 0.30
+            Part("Spine"..i, "Models/Cone.mdl", spineMat,
+                math.sin(rad)*0.45, 1.72 + h*0.5, math.cos(rad)*0.45,
+                0.08, h, 0.08)
+        end
+
+        -- 紫色巨型眼（Boss 级大眼增强辨识度）
+        local em = EyeMat(0.85, 0.25, 1.0, 3.5, 0.8, 5.5)
+        Part("EyeL", "Models/Sphere.mdl", em, -0.40, 1.06, 0.78, 0.28, 0.26, 0.25)
+        Part("EyeR", "Models/Sphere.mdl", em,  0.40, 1.06, 0.78, 0.28, 0.26, 0.25)
+        Part("EyeM", "Models/Sphere.mdl", em,  0.00, 1.22, 0.82, 0.18, 0.16, 0.15)
 
     else
         -- 兜底
@@ -379,7 +533,7 @@ function M.SpawnMonster(monsterType, opts)
     hp = math.floor(hp + 0.5)
     shieldHp = math.floor(shieldHp + 0.5)
 
-    -- === 出生位置 (径向刷新) ===
+    -- === 出生位置 (路径起点 / 兜底随机) ===
     local sx, sz
     if spawnX and spawnZ then
         sx = spawnX
@@ -391,6 +545,14 @@ function M.SpawnMonster(monsterType, opts)
         sx = math.cos(angle) * sd
         sz = math.sin(angle) * sd
     end
+
+    -- 路径跟随数据 (由 Wave.lua 在 opts 中传入)
+    local pathData = opts.pathData       -- 路径航点列表 { {x,z}, ... }
+    local pathWidth = opts.pathWidth or 10  -- 路径宽度
+    local waypointIdx = 2                 -- 从第2个航点开始追踪（第1个是出生点）
+
+    -- 路径横向偏移 (让每个怪物走略微不同的车道，分散行进)
+    local laneOffset = (math.random() - 0.5) * pathWidth * 0.6  -- ±30% 路径宽度
 
     -- === 创建节点 ===
     local node = GS.scene:CreateChild("Monster")
@@ -517,6 +679,11 @@ function M.SpawnMonster(monsterType, opts)
         lineDmgReduction = typeDef.lineDmgReduction or 0,
         lineHealPerSec = lineHealPerSec,
         lineImmune = typeDef.lineImmune or false,
+        -- 路径跟随
+        pathData = pathData,           -- 路径航点列表 (nil 则退化为冲向中心)
+        pathWidth = pathWidth,
+        waypointIdx = waypointIdx,     -- 当前追踪的下一个航点索引
+        laneOffset = laneOffset,       -- 横向车道偏移 (分散行进)
         -- Boss: 裂山巨像护甲周期
         armorCycleTimer = 0,
         armorBuffTimer = 0,
@@ -557,25 +724,26 @@ end
 --- @param pos Vector3 当前位置
 --- @param dir Vector3 当前移动方向 (归一化)
 --- @return number pushX, number pushZ 推力分量
-local function CalculateSteering(pos, dir)
+local function CalculateSteering(pos, dir, monsterSize)
     local lookAhead = CONFIG.SteerLookAhead
-    local avoidR = CONFIG.SteerAvoidRadius
     local pushForce = CONFIG.SteerPushForce
+    local monsterR = (monsterSize or 0.35) * 0.5  -- 怪物自身碰撞半径
 
     -- 前视位置
     local aheadX = pos.x + dir.x * lookAhead
     local aheadZ = pos.z + dir.z * lookAhead
     local pushX, pushZ = 0, 0
 
-    -- 检测塔
+    -- 检测塔 (塔占据约 1x1 格)
+    local towerAvoidR = CONFIG.SteerAvoidRadius + 0.3
     for _, t in ipairs(GS.towers) do
         if t.node then
             local tp = t.node.position
             local ddx = aheadX - tp.x
             local ddz = aheadZ - tp.z
             local dist = math.sqrt(ddx * ddx + ddz * ddz)
-            if dist < avoidR then
-                local factor = pushForce * (1.0 - dist / avoidR)
+            if dist < towerAvoidR then
+                local factor = pushForce * (1.0 - dist / towerAvoidR)
                 if dist > 0.01 then
                     pushX = pushX + (ddx / dist) * factor
                     pushZ = pushZ + (ddz / dist) * factor
@@ -587,21 +755,32 @@ local function CalculateSteering(pos, dir)
         end
     end
 
-    -- 检测场景物件
+    -- 检测地形物件 (用物件实际尺寸作碰撞半径)
     for _, obj in ipairs(GS.terrainObjects) do
         if obj.node then
             local op = obj.node.position
-            local ddx = aheadX - op.x
-            local ddz = aheadZ - op.z
-            local dist = math.sqrt(ddx * ddx + ddz * ddz)
-            if dist < avoidR then
-                local factor = pushForce * (1.0 - dist / avoidR)
-                if dist > 0.01 then
-                    pushX = pushX + (ddx / dist) * factor
-                    pushZ = pushZ + (ddz / dist) * factor
-                else
-                    pushX = pushX + (math.random() - 0.5) * factor
-                    pushZ = pushZ + (math.random() - 0.5) * factor
+            local objSize = obj.node.scale.x  -- Terrain.lua 中 scale = (s,s,s)
+            -- 避障半径 = 物件半径 + 怪物半径 + 安全间距
+            local objAvoidR = objSize * 0.6 + monsterR + 0.4
+
+            -- 同时检测前视位置和当前位置 (双重检查)
+            for probe = 1, 2 do
+                local px = (probe == 1) and aheadX or pos.x
+                local pz = (probe == 1) and aheadZ or pos.z
+                local ddx = px - op.x
+                local ddz = pz - op.z
+                local dist = math.sqrt(ddx * ddx + ddz * ddz)
+                if dist < objAvoidR then
+                    -- 越近推力越强, 双重探针时当前位置推力更大
+                    local strength = (probe == 1) and pushForce or (pushForce * 2.0)
+                    local factor = strength * (1.0 - dist / objAvoidR)
+                    if dist > 0.01 then
+                        pushX = pushX + (ddx / dist) * factor
+                        pushZ = pushZ + (ddz / dist) * factor
+                    else
+                        pushX = pushX + (math.random() - 0.5) * factor * 2
+                        pushZ = pushZ + (math.random() - 0.5) * factor * 2
+                    end
                 end
             end
         end
@@ -610,9 +789,98 @@ local function CalculateSteering(pos, dir)
     return pushX, pushZ
 end
 
+-- 硬碰撞: 将怪物推出地形物件 (防止重叠穿模)
+local function EnforceTerrainCollision(pos, monsterSize)
+    local monsterR = (monsterSize or 0.35) * 0.5
+    local corrected = false
+    for _, obj in ipairs(GS.terrainObjects) do
+        if obj.node then
+            local op = obj.node.position
+            local objSize = obj.node.scale.x  -- Terrain.lua 中 scale = (s,s,s)
+            local collisionR = objSize * 0.55 + monsterR  -- 硬碰撞半径(略小于避障)
+            local ddx = pos.x - op.x
+            local ddz = pos.z - op.z
+            local dist = math.sqrt(ddx * ddx + ddz * ddz)
+            if dist < collisionR then
+                -- 直接推出到碰撞半径边界
+                if dist > 0.01 then
+                    local pushOut = collisionR - dist + 0.05
+                    pos.x = pos.x + (ddx / dist) * pushOut
+                    pos.z = pos.z + (ddz / dist) * pushOut
+                else
+                    pos.x = pos.x + (math.random() - 0.5) * collisionR
+                    pos.z = pos.z + (math.random() - 0.5) * collisionR
+                end
+                corrected = true
+            end
+        end
+    end
+    return corrected
+end
+
 -- ============================================================================
--- 怪物移动 (直线冲向中心 + 转向避障)
+-- 怪物移动 (路径航点跟随 + 转向避障)
 -- ============================================================================
+
+--- 计算怪物期望移动方向 (路径跟随 / 退化为冲向中心)
+--- @param m table 怪物实例
+--- @param pos Vector3 当前位置
+--- @return number desiredX, number desiredZ, boolean reachedEnd
+local function CalcDesiredDirection(m, pos)
+    -- 如果有路径数据, 沿航点移动
+    if m.pathData and m.waypointIdx then
+        local wp = m.pathData[m.waypointIdx]
+        if not wp then
+            -- 已超出航点列表 → 冲向能源塔中心
+            local dx = 0 - pos.x
+            local dz = 0 - pos.z
+            local dist = math.sqrt(dx * dx + dz * dz)
+            if dist < 1.0 then return 0, 0, true end
+            return dx / dist, dz / dist, false
+        end
+
+        -- 目标航点方向
+        local dx = wp[1] - pos.x
+        local dz = wp[2] - pos.z
+        local dist = math.sqrt(dx * dx + dz * dz)
+
+        -- 到达当前航点阈值 (越宽的路径阈值稍大)
+        local arriveThreshold = math.max(1.5, (m.pathWidth or 10) * 0.15)
+        if dist < arriveThreshold then
+            m.waypointIdx = m.waypointIdx + 1
+            return CalcDesiredDirection(m, pos)
+        end
+
+        -- 应用车道偏移: 沿路径垂直方向偏移目标点，使怪物分散行进
+        local offset = m.laneOffset or 0
+        if offset ~= 0 and dist > 0.1 then
+            -- 路径方向归一化
+            local ndx, ndz = dx / dist, dz / dist
+            -- 垂直方向 (左手坐标系下右侧)
+            local perpX, perpZ = -ndz, ndx
+            -- 接近最终目标时逐渐收拢 (最后3个航点衰减偏移)
+            local remaining = #m.pathData - m.waypointIdx
+            local fadeFactor = math.min(1.0, remaining / 3.0)
+            local appliedOffset = offset * fadeFactor
+            -- 偏移后的目标
+            local targetX = wp[1] + perpX * appliedOffset
+            local targetZ = wp[2] + perpZ * appliedOffset
+            dx = targetX - pos.x
+            dz = targetZ - pos.z
+            dist = math.sqrt(dx * dx + dz * dz)
+            if dist < 0.01 then dist = 0.01 end
+        end
+
+        return dx / dist, dz / dist, false
+    end
+
+    -- 无路径: 退化为冲向能源塔中心 (0,0)
+    local dx = 0 - pos.x
+    local dz = 0 - pos.z
+    local dist = math.sqrt(dx * dx + dz * dz)
+    if dist < 1.0 then return 0, 0, true end
+    return dx / dist, dz / dist, false
+end
 
 function M.UpdateMonsters(dt)
     local i = 1
@@ -623,22 +891,14 @@ function M.UpdateMonsters(dt)
         else
             local pos = m.node.position
             local speed = StatusEffect.GetEffectiveSpeed(m)
-            local reachedEnd = false
 
-            -- 计算朝向能源塔中心的方向
-            local toDx = 0 - pos.x
-            local toDz = 0 - pos.z
-            local toDist = math.sqrt(toDx * toDx + toDz * toDz)
+            -- 计算期望方向 (路径跟随 or 冲向中心)
+            local desiredX, desiredZ, reachedEnd = CalcDesiredDirection(m, pos)
 
-            if toDist < 1.0 then
-                reachedEnd = true
-            else
-                -- 归一化期望方向
-                local desiredX = toDx / toDist
-                local desiredZ = toDz / toDist
-
-                -- 转向避障
-                local pushX, pushZ = CalculateSteering(pos, m.dir)
+            if not reachedEnd then
+                -- 转向避障 (传入怪物尺寸用于计算碰撞半径)
+                local mSize = m.node.scale.x
+                local pushX, pushZ = CalculateSteering(pos, m.dir, mSize)
 
                 -- 混合: 期望方向 + 推力
                 local finalX = desiredX + pushX
@@ -668,6 +928,10 @@ function M.UpdateMonsters(dt)
                 -- 移动
                 pos.x = pos.x + m.dir.x * speed * dt
                 pos.z = pos.z + m.dir.z * speed * dt
+
+                -- 硬碰撞: 防止怪物穿入地形物件
+                EnforceTerrainCollision(pos, mSize)
+
                 m.node.position = pos
 
                 -- 更新朝向

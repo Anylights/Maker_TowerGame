@@ -157,7 +157,20 @@ local function CreateParticleNode(parentNode, cfg)
     local dc  = cfg.diffColor or cfg.tint or cfg.matColor or Color(1, 1, 1, 1)
     local useTex = cfg.tex and not isSoftTex(cfg.tex)
     local texObj = useTex and cache:GetResource("Texture2D", cfg.tex)
-    if texObj then
+    if cfg.additive and texObj then
+        -- 加法混合 + 贴图：DiffAdd → 粒子叠加发光（HDR 颜色值越高越亮）
+        mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/DiffAdd.xml"))
+        mat:SetTexture(TU_DIFFUSE, texObj)
+        mat:SetShaderParameter("MatDiffColor", Variant(Color(dc.r, dc.g, dc.b, 1.0)))
+    elseif cfg.additive then
+        -- 加法混合 + 无贴图：使用 DiffAdd + 白色圆点贴图模拟发光软粒子
+        mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/DiffAdd.xml"))
+        local fallbackTex = cache:GetResource("Texture2D", "Textures/ParticleFX1/Star_Shine.png")
+        if fallbackTex then
+            mat:SetTexture(TU_DIFFUSE, fallbackTex)
+        end
+        mat:SetShaderParameter("MatDiffColor", Variant(Color(dc.r, dc.g, dc.b, 1.0)))
+    elseif texObj then
         -- 硬边贴图：DiffAlpha alpha testing，不需要 IBL/Zone
         mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/DiffAlpha.xml"))
         mat:SetTexture(TU_DIFFUSE, texObj)
@@ -347,146 +360,294 @@ VFX_CREATORS["corrosion"] = function(towerNode)
     })
 end
 
--- 雷鸣圣器: 闪电弧粒子在炮口闪烁
+-- 雷鸣圣器: 紫蓝电弧链 — 高亮闪电+电磁脉冲环+微粒电花
 VFX_CREATORS["thunder"] = function(towerNode)
+    -- 主闪电弧：大尺寸、极短寿命、高频闪烁 → 视觉上"劈啪"感
     local node = CreateParticleNode(towerNode, {
         offset = ANCHOR_OFFSETS.muzzle,
         tex = TEX.pfx_lightning,
-        tint = Color(0.8, 0.3, 2.0, 1),
+        tint = Color(0.6, 0.3, 3.5, 1),
         additive = true,
-        maxParticles = 14, emitRate = 8,
-        life = 0.18,
-        sizeMin = 0.100, sizeMax = 0.220,
+        maxParticles = 20, emitRate = 18,
+        lifeMin = 0.06, lifeMax = 0.14,
+        sizeMin = 0.140, sizeMax = 0.300,
         gravity = 0,
-        shapeRadius = 0.12,
-        rotSpeed = 360,
-        velMin = Vector3(-0.6, -0.4, -0.6), velMax = Vector3(0.6, 0.6, 0.6),
+        shapeRadius = 0.15,
+        rotSpeed = 600,
+        velMin = Vector3(-1.0, -0.8, -1.0), velMax = Vector3(1.0, 1.0, 1.0),
         colors = {
-            { time = 0.0, color = Color(0.8, 0.3, 3.0, 1.0) },
-            { time = 0.4, color = Color(1.0, 0.6, 2.5, 0.7) },
-            { time = 1.0, color = Color(0.5, 0.2, 1.0, 0.0) },
+            { time = 0.0, color = Color(0.6, 0.4, 5.0, 1.0) },
+            { time = 0.3, color = Color(0.9, 0.7, 4.0, 0.9) },
+            { time = 0.7, color = Color(0.5, 0.3, 3.0, 0.4) },
+            { time = 1.0, color = Color(0.2, 0.1, 1.5, 0.0) },
         },
     })
-    -- 附加电弧粒子
+    -- 电磁脉冲环：向外快速扩散的环形粒子
     CreateParticleNode(towerNode, {
         offset = ANCHOR_OFFSETS.muzzle,
-        tex = TEX.pfx_eletric_a,
-        tint = Color(0.6, 0.5, 2.5, 1),
-        maxParticles = 8, emitRate = 5,
-        life = 0.12,
-        sizeMin = 0.080, sizeMax = 0.150,
+        tex = TEX.pfx_eletric_exp,
+        tint = Color(0.4, 0.6, 4.0, 1),
+        additive = true,
+        maxParticles = 10, emitRate = 6,
+        lifeMin = 0.10, lifeMax = 0.22,
+        sizeMin = 0.120, sizeMax = 0.250,
         gravity = 0,
-        shapeRadius = 0.08,
-        rotSpeed = 500,
-        velMin = Vector3(-0.8, -0.6, -0.8), velMax = Vector3(0.8, 0.8, 0.8),
+        shapeRadius = 0.06,
+        rotSpeed = 400,
+        velMin = Vector3(-1.5, -1.0, -1.5), velMax = Vector3(1.5, 1.2, 1.5),
         colors = {
-            { time = 0.0, color = Color(0.8, 0.6, 3.5, 1.0) },
-            { time = 1.0, color = Color(0.3, 0.2, 1.5, 0.0) },
+            { time = 0.0, color = Color(0.5, 0.8, 5.0, 1.0) },
+            { time = 0.5, color = Color(0.7, 0.5, 3.5, 0.6) },
+            { time = 1.0, color = Color(0.2, 0.1, 2.0, 0.0) },
+        },
+    })
+    -- 微粒电火花：细小高亮，快速衰减
+    CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.pfx_sparks,
+        tint = Color(0.7, 0.5, 4.5, 1),
+        additive = true,
+        maxParticles = 16, emitRate = 12,
+        life = 0.08,
+        sizeMin = 0.020, sizeMax = 0.050,
+        gravity = 0.3,
+        shapeRadius = 0.10,
+        rotSpeed = 720,
+        velMin = Vector3(-1.2, -0.5, -1.2), velMax = Vector3(1.2, 1.5, 1.2),
+        colors = {
+            { time = 0.0, color = Color(1.0, 0.8, 6.0, 1.0) },
+            { time = 1.0, color = Color(0.3, 0.2, 2.0, 0.0) },
         },
     })
     return node
 end
 
--- 裂片圣器: 岩石碎块弧线掉落
+-- 裂片圣器: 金属碎片弧线爆裂 — 橙金弹片+火花+重力飞散
 VFX_CREATORS["splinter"] = function(towerNode)
-    return CreateParticleNode(towerNode, {
+    -- 主碎片：金属橙色，有重力弧线，旋转飞散
+    local node = CreateParticleNode(towerNode, {
         offset = ANCHOR_OFFSETS.muzzle,
         tex = TEX.pfx_rock_break,
-        tint = Color(0.8, 0.8, 0.8, 1),
-        maxParticles = 18, emitRate = 7,
-        life = 0.8,
-        sizeMin = 0.070, sizeMax = 0.120,
-        gravity = 1.0,
-        shapeRadius = 0.08,
-        rotSpeed = 220,
-        velMin = Vector3(-0.5, 0.3, -0.5), velMax = Vector3(0.5, 0.7, 0.5),
+        tint = Color(2.0, 1.2, 0.3, 1),
+        additive = true,
+        maxParticles = 24, emitRate = 12,
+        lifeMin = 0.4, lifeMax = 0.8,
+        sizeMin = 0.060, sizeMax = 0.140,
+        gravity = 1.8,
+        shapeRadius = 0.06,
+        rotSpeed = 360,
+        velMin = Vector3(-0.8, 0.6, -0.8), velMax = Vector3(0.8, 1.8, 0.8),
         colors = {
-            { time = 0.0, color = Color(1.0, 0.95, 0.85, 1.0) },
-            { time = 0.5, color = Color(0.8, 0.75, 0.65, 0.6) },
-            { time = 1.0, color = Color(0.5, 0.45, 0.40, 0.0) },
+            { time = 0.0, color = Color(3.0, 2.0, 0.4, 1.0) },
+            { time = 0.3, color = Color(2.5, 1.5, 0.2, 0.9) },
+            { time = 0.7, color = Color(1.5, 0.8, 0.1, 0.4) },
+            { time = 1.0, color = Color(0.6, 0.3, 0.0, 0.0) },
         },
     })
+    -- 溅射火花：高速小粒子，金白色
+    CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.pfx_fire_sparks,
+        tint = Color(3.0, 2.5, 0.8, 1),
+        additive = true,
+        maxParticles = 18, emitRate = 14,
+        life = 0.15,
+        sizeMin = 0.025, sizeMax = 0.055,
+        gravity = 0.8,
+        shapeRadius = 0.04,
+        rotSpeed = 480,
+        velMin = Vector3(-1.5, 0.3, -1.5), velMax = Vector3(1.5, 2.2, 1.5),
+        colors = {
+            { time = 0.0, color = Color(4.0, 3.5, 1.0, 1.0) },
+            { time = 0.5, color = Color(3.0, 1.8, 0.3, 0.6) },
+            { time = 1.0, color = Color(1.0, 0.4, 0.0, 0.0) },
+        },
+    })
+    return node
 end
 
--- 穿透弹芯: 银白色子弹拖尾从炮口高速喷出
+-- 穿透弹芯: 银蓝高速穿射 — 激光拖尾+能量涟漪+尖锐光点
 VFX_CREATORS["piercing_core"] = function(towerNode)
-    return CreateParticleNode(towerNode, {
+    -- 主拖尾：纵向高速银蓝线条，极窄发射域
+    local node = CreateParticleNode(towerNode, {
         offset = ANCHOR_OFFSETS.muzzle,
         tex = TEX.bullet_trail,
-        tint = Color(1.5, 1.5, 2.0, 1),
+        tint = Color(1.2, 1.8, 4.0, 1),
         additive = true,
-        maxParticles = 24, emitRate = 14,
-        life = 0.25,
-        sizeMin = 0.040, sizeMax = 0.080,
-        gravity = 0,
-        shapeRadius = 0.03,
-        velMin = Vector3(-0.1, 1.0, -0.1), velMax = Vector3(0.1, 2.5, 0.1),
-        colors = {
-            { time = 0.0, color = Color(1.5, 1.5, 2.5, 1.0) },
-            { time = 0.5, color = Color(1.0, 1.0, 2.0, 0.5) },
-            { time = 1.0, color = Color(0.8, 0.8, 1.5, 0.0) },
-        },
-    })
-end
-
--- 狙击改装: 红色激光瞄准粒子
-VFX_CREATORS["sniper_mod"] = function(towerNode)
-    return CreateParticleNode(towerNode, {
-        offset = ANCHOR_OFFSETS.muzzle,
-        tex = TEX.soft_spot,
-        tint = Color(2, 0.1, 0.1, 1),
-        additive = true,
-        maxParticles = 6, emitRate = 2,
-        lifeMin = 1.2, lifeMax = 2.0,
-        sizeMin = 0.040, sizeMax = 0.070,
+        maxParticles = 32, emitRate = 22,
+        lifeMin = 0.12, lifeMax = 0.28,
+        sizeMin = 0.030, sizeMax = 0.070,
         gravity = 0,
         shapeRadius = 0.02,
-        velMin = Vector3(-0.03, 0.3, -0.03), velMax = Vector3(0.03, 0.8, 0.03),
+        velMin = Vector3(-0.05, 1.5, -0.05), velMax = Vector3(0.05, 3.5, 0.05),
         colors = {
-            { time = 0.0, color = Color(2.0, 0.1, 0.1, 0.9) },
-            { time = 0.5, color = Color(1.5, 0.1, 0.1, 0.5) },
-            { time = 1.0, color = Color(1.0, 0.1, 0.1, 0.0) },
+            { time = 0.0, color = Color(1.5, 2.0, 5.0, 1.0) },
+            { time = 0.3, color = Color(1.2, 1.5, 4.0, 0.8) },
+            { time = 0.7, color = Color(0.8, 1.0, 3.0, 0.3) },
+            { time = 1.0, color = Color(0.4, 0.5, 2.0, 0.0) },
         },
     })
+    -- 能量涟漪：环形快速扩散
+    CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.ring,
+        tint = Color(0.8, 1.2, 3.5, 1),
+        additive = true,
+        maxParticles = 8, emitRate = 5,
+        lifeMin = 0.15, lifeMax = 0.30,
+        sizeMin = 0.050, sizeMax = 0.120,
+        gravity = 0,
+        shapeRadius = 0.02,
+        rotSpeed = 200,
+        velMin = Vector3(-0.3, 2.0, -0.3), velMax = Vector3(0.3, 3.0, 0.3),
+        colors = {
+            { time = 0.0, color = Color(1.0, 1.5, 4.5, 1.0) },
+            { time = 0.5, color = Color(0.8, 1.0, 3.0, 0.5) },
+            { time = 1.0, color = Color(0.4, 0.6, 2.0, 0.0) },
+        },
+    })
+    -- 尖锐光点：极小高亮白蓝点
+    CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.sparkle,
+        tint = Color(1.5, 2.0, 5.0, 1),
+        additive = true,
+        maxParticles = 10, emitRate = 8,
+        life = 0.10,
+        sizeMin = 0.015, sizeMax = 0.035,
+        gravity = 0,
+        shapeRadius = 0.03,
+        rotSpeed = 360,
+        velMin = Vector3(-0.2, 1.0, -0.2), velMax = Vector3(0.2, 2.5, 0.2),
+        colors = {
+            { time = 0.0, color = Color(2.0, 2.5, 6.0, 1.0) },
+            { time = 1.0, color = Color(0.5, 0.8, 2.5, 0.0) },
+        },
+    })
+    return node
 end
 
--- 棱镜圣器: 七彩环形光斑
+-- 狙击改装: 深红精准激光 — 聚焦红光束+蓄力旋涡+瞄准闪点
+VFX_CREATORS["sniper_mod"] = function(towerNode)
+    -- 聚焦激光束：窄且长的红色拖尾线
+    local node = CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.bullet_trail,
+        tint = Color(3.5, 0.1, 0.1, 1),
+        additive = true,
+        maxParticles = 12, emitRate = 6,
+        lifeMin = 0.4, lifeMax = 0.8,
+        sizeMin = 0.020, sizeMax = 0.045,
+        gravity = 0,
+        shapeRadius = 0.01,
+        velMin = Vector3(-0.02, 0.8, -0.02), velMax = Vector3(0.02, 2.0, 0.02),
+        colors = {
+            { time = 0.0, color = Color(4.5, 0.2, 0.1, 1.0) },
+            { time = 0.3, color = Color(3.5, 0.1, 0.05, 0.8) },
+            { time = 0.7, color = Color(2.5, 0.05, 0.0, 0.4) },
+            { time = 1.0, color = Color(1.0, 0.0, 0.0, 0.0) },
+        },
+    })
+    -- 蓄力旋涡：红色光圈缓慢收束
+    CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.ring,
+        tint = Color(3.0, 0.15, 0.05, 1),
+        additive = true,
+        maxParticles = 6, emitRate = 3,
+        lifeMin = 0.8, lifeMax = 1.5,
+        sizeMin = 0.080, sizeMax = 0.160,
+        gravity = 0,
+        shapeRadius = 0.15,
+        rotSpeed = 120,
+        velMin = Vector3(-0.3, 0.0, -0.3), velMax = Vector3(0.3, 0.3, 0.3),
+        damping = 2.0,
+        colors = {
+            { time = 0.0, color = Color(4.0, 0.2, 0.1, 0.9) },
+            { time = 0.5, color = Color(3.0, 0.1, 0.05, 0.5) },
+            { time = 1.0, color = Color(1.5, 0.0, 0.0, 0.0) },
+        },
+    })
+    -- 瞄准闪点：中心高亮白红光点闪烁
+    CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.sparkle,
+        tint = Color(5.0, 1.0, 0.5, 1),
+        additive = true,
+        maxParticles = 4, emitRate = 3,
+        lifeMin = 0.15, lifeMax = 0.35,
+        sizeMin = 0.030, sizeMax = 0.060,
+        gravity = 0,
+        shapeRadius = 0.01,
+        rotSpeed = 240,
+        velMin = Vector3(-0.02, 0.1, -0.02), velMax = Vector3(0.02, 0.4, 0.02),
+        colors = {
+            { time = 0.0, color = Color(6.0, 2.0, 0.8, 1.0) },
+            { time = 0.5, color = Color(4.0, 0.5, 0.2, 0.7) },
+            { time = 1.0, color = Color(2.0, 0.1, 0.0, 0.0) },
+        },
+    })
+    return node
+end
+
+-- 棱镜圣器: 华丽七彩折射 — 彩虹光环旋转+棱镜碎片飘散+中心白芒
 VFX_CREATORS["prism"] = function(towerNode)
+    -- 彩虹光环：大尺寸缓慢旋转，形成棱镜折射的氛围感
     local node = CreateParticleNode(towerNode, {
         offset = ANCHOR_OFFSETS.muzzle,
         tex = TEX.rainbow,
         additive = true,
-        maxParticles = 20, emitRate = 8,
-        lifeMin = 1.5, lifeMax = 2.5,
-        sizeMin = 0.080, sizeMax = 0.140,
+        maxParticles = 16, emitRate = 7,
+        lifeMin = 2.0, lifeMax = 3.5,
+        sizeMin = 0.120, sizeMax = 0.220,
         gravity = 0,
-        shapeRadius = 0.08,
-        rotSpeed = 60,
-        velMin = Vector3(-0.1, -0.1, -0.1), velMax = Vector3(0.1, 0.1, 0.1),
+        shapeRadius = 0.06,
+        rotSpeed = 45,
+        velMin = Vector3(-0.05, -0.03, -0.05), velMax = Vector3(0.05, 0.06, 0.05),
         colors = {
-            { time = 0.0, color = Color(1.5, 1.5, 1.5, 1.0) },
-            { time = 0.5, color = Color(1.5, 1.5, 1.5, 0.7) },
-            { time = 1.0, color = Color(1.5, 1.5, 1.5, 0.0) },
+            { time = 0.0, color = Color(2.5, 2.5, 2.5, 1.0) },
+            { time = 0.3, color = Color(2.0, 2.0, 2.0, 0.9) },
+            { time = 0.7, color = Color(1.8, 1.8, 1.8, 0.5) },
+            { time = 1.0, color = Color(1.2, 1.2, 1.2, 0.0) },
         },
     })
-    -- 附加：七色碎片闪烁
+    -- 七色棱镜碎片：循环变色高亮闪烁，散布范围较大
     CreateParticleNode(towerNode, {
         offset = ANCHOR_OFFSETS.muzzle,
         tex = TEX.sparkle,
         additive = true,
-        maxParticles = 12, emitRate = 6,
-        life = 0.8,
-        sizeMin = 0.040, sizeMax = 0.080,
+        maxParticles = 20, emitRate = 12,
+        lifeMin = 0.5, lifeMax = 1.0,
+        sizeMin = 0.035, sizeMax = 0.080,
         gravity = 0,
-        shapeRadius = 0.12,
-        rotSpeed = 180,
-        velMin = Vector3(-0.2, -0.1, -0.2), velMax = Vector3(0.2, 0.1, 0.2),
+        shapeRadius = 0.18,
+        rotSpeed = 300,
+        velMin = Vector3(-0.3, -0.2, -0.3), velMax = Vector3(0.3, 0.3, 0.3),
         colors = {
-            { time = 0.00, color = Color(2.5, 0.2, 0.2, 1.0) },
-            { time = 0.25, color = Color(0.2, 2.5, 0.2, 1.0) },
-            { time = 0.50, color = Color(0.2, 0.2, 2.5, 1.0) },
-            { time = 0.75, color = Color(2.5, 2.0, 0.2, 1.0) },
+            { time = 0.00, color = Color(4.0, 0.3, 0.3, 1.0) },
+            { time = 0.20, color = Color(3.5, 2.5, 0.2, 1.0) },
+            { time = 0.40, color = Color(0.3, 4.0, 0.3, 1.0) },
+            { time = 0.60, color = Color(0.3, 2.0, 4.0, 1.0) },
+            { time = 0.80, color = Color(3.0, 0.3, 4.0, 1.0) },
             { time = 1.00, color = Color(2.0, 0.2, 2.0, 0.0) },
+        },
+    })
+    -- 中心白芒：强烈发光核心，营造"能量聚焦"感
+    CreateParticleNode(towerNode, {
+        offset = ANCHOR_OFFSETS.muzzle,
+        tex = TEX.soft_spot,
+        tint = Color(3.0, 3.0, 4.0, 1),
+        additive = true,
+        maxParticles = 6, emitRate = 4,
+        lifeMin = 0.6, lifeMax = 1.2,
+        sizeMin = 0.060, sizeMax = 0.110,
+        gravity = 0,
+        shapeRadius = 0.02,
+        velMin = Vector3(-0.02, -0.01, -0.02), velMax = Vector3(0.02, 0.04, 0.02),
+        colors = {
+            { time = 0.0, color = Color(4.0, 4.0, 5.0, 1.0) },
+            { time = 0.4, color = Color(3.0, 3.0, 4.0, 0.8) },
+            { time = 1.0, color = Color(1.5, 1.5, 2.5, 0.0) },
         },
     })
     return node
@@ -1443,155 +1604,205 @@ end
 -- ============================================================================
 local BULLET_VFX = {}
 
+-- 连射模块弹道: 高频橙黄弹幕火花拖尾
 BULLET_VFX["rapid_fire_module"] = {
-    tex = TEX.pfx_sparks, tint = Color(2.5, 1.8, 0.2, 1), additive = true,
-    maxParticles = 8, emitRate = 30, life = 0.10,
-    sizeMin = 0.020, sizeMax = 0.045, shapeRadius = 0.02, gravity = 0,
-    velMin = Vector3(-0.12, -0.12, -0.12), velMax = Vector3(0.12, 0.12, 0.12),
+    tex = TEX.pfx_sparks, tint = Color(3.5, 2.5, 0.3, 1), additive = true,
+    maxParticles = 14, emitRate = 50, life = 0.08,
+    sizeMin = 0.025, sizeMax = 0.055, shapeRadius = 0.025, gravity = 0.3, rotSpeed = 420,
+    velMin = Vector3(-0.25, -0.15, -0.25), velMax = Vector3(0.25, 0.25, 0.25),
     colors = {
-        { time = 0.0, color = Color(3.0, 2.5, 0.3, 1.0) },
-        { time = 1.0, color = Color(0.8, 0.4, 0.0, 0.0) },
+        { time = 0.0, color = Color(4.0, 3.5, 0.5, 1.0) },
+        { time = 0.25, color = Color(3.5, 2.5, 0.2, 0.9) },
+        { time = 0.6, color = Color(2.0, 1.0, 0.1, 0.5) },
+        { time = 1.0, color = Color(0.8, 0.3, 0.0, 0.0) },
     },
 }
+-- 火种圣器弹道: 燃烧火焰拖尾，红橙渐变
 BULLET_VFX["fire_seed"] = {
-    tex = TEX.pfx_sparky_flame, tint = Color(2.5, 1.2, 0.1, 1), additive = true,
-    maxParticles = 8, emitRate = 25, life = 0.12,
-    sizeMin = 0.030, sizeMax = 0.060, shapeRadius = 0.02, gravity = 0,
-    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    tex = TEX.pfx_sparky_flame, tint = Color(3.0, 1.5, 0.1, 1), additive = true,
+    maxParticles = 12, emitRate = 40, life = 0.15,
+    sizeMin = 0.035, sizeMax = 0.075, shapeRadius = 0.025, gravity = -0.2, rotSpeed = 180,
+    velMin = Vector3(-0.18, -0.10, -0.18), velMax = Vector3(0.18, 0.20, 0.18),
     colors = {
-        { time = 0.0, color = Color(3.0, 1.5, 0.1, 1.0) },
-        { time = 1.0, color = Color(1.0, 0.3, 0.0, 0.0) },
+        { time = 0.0, color = Color(4.0, 2.0, 0.3, 1.0) },
+        { time = 0.2, color = Color(3.5, 1.2, 0.1, 0.9) },
+        { time = 0.5, color = Color(2.5, 0.6, 0.05, 0.6) },
+        { time = 0.8, color = Color(1.2, 0.2, 0.0, 0.3) },
+        { time = 1.0, color = Color(0.4, 0.05, 0.0, 0.0) },
     },
 }
+-- 冰晶圣器弹道: 冰蓝结晶碎片拖尾
 BULLET_VFX["ice_crystal"] = {
-    tex = TEX.pfx_icicle, tint = Color(0.5, 0.85, 2.0, 1),
-    maxParticles = 8, emitRate = 22, life = 0.13,
-    sizeMin = 0.025, sizeMax = 0.055, shapeRadius = 0.02, gravity = 0,
-    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
+    tex = TEX.pfx_icicle, tint = Color(0.6, 1.2, 3.5, 1), additive = true,
+    maxParticles = 12, emitRate = 38, life = 0.14,
+    sizeMin = 0.028, sizeMax = 0.065, shapeRadius = 0.025, gravity = 0.2, rotSpeed = 300,
+    velMin = Vector3(-0.15, -0.12, -0.15), velMax = Vector3(0.15, 0.15, 0.15),
     colors = {
-        { time = 0.0, color = Color(0.5, 0.9, 2.5, 1.0) },
-        { time = 1.0, color = Color(0.6, 0.8, 1.8, 0.0) },
+        { time = 0.0, color = Color(1.0, 1.5, 4.5, 1.0) },
+        { time = 0.2, color = Color(0.7, 1.2, 3.5, 0.9) },
+        { time = 0.5, color = Color(0.4, 0.9, 2.5, 0.6) },
+        { time = 0.8, color = Color(0.3, 0.7, 1.8, 0.3) },
+        { time = 1.0, color = Color(0.2, 0.5, 1.2, 0.0) },
     },
 }
+-- 腐蚀圣器弹道: 酸绿毒液飞溅拖尾
 BULLET_VFX["corrosion"] = {
-    tex = TEX.pfx_toxic, tint = Color(0.3, 1.2, 0.1, 1),
-    maxParticles = 6, emitRate = 18, life = 0.14,
-    sizeMin = 0.025, sizeMax = 0.050, shapeRadius = 0.02, gravity = 0,
-    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
+    tex = TEX.pfx_toxic, tint = Color(0.4, 2.5, 0.2, 1), additive = true,
+    maxParticles = 10, emitRate = 32, life = 0.16,
+    sizeMin = 0.030, sizeMax = 0.065, shapeRadius = 0.025, gravity = 0.5, rotSpeed = 150,
+    velMin = Vector3(-0.15, -0.10, -0.15), velMax = Vector3(0.15, 0.20, 0.15),
     colors = {
-        { time = 0.0, color = Color(0.3, 2.0, 0.1, 1.0) },
-        { time = 1.0, color = Color(0.1, 0.5, 0.0, 0.0) },
+        { time = 0.0, color = Color(0.5, 3.5, 0.3, 1.0) },
+        { time = 0.25, color = Color(0.3, 2.8, 0.2, 0.9) },
+        { time = 0.55, color = Color(0.2, 1.8, 0.1, 0.5) },
+        { time = 0.8, color = Color(0.1, 1.0, 0.05, 0.2) },
+        { time = 1.0, color = Color(0.05, 0.4, 0.0, 0.0) },
     },
 }
 BULLET_VFX["thunder"] = {
-    tex = TEX.pfx_lightning, tint = Color(0.8, 0.3, 2.0, 1), additive = true,
-    maxParticles = 8, emitRate = 28, life = 0.09,
-    sizeMin = 0.040, sizeMax = 0.080, shapeRadius = 0.03, gravity = 0, rotSpeed = 360,
-    velMin = Vector3(-0.12, -0.12, -0.12), velMax = Vector3(0.12, 0.12, 0.12),
+    tex = TEX.pfx_lightning, tint = Color(0.5, 0.3, 4.0, 1), additive = true,
+    maxParticles = 14, emitRate = 45, life = 0.07,
+    sizeMin = 0.050, sizeMax = 0.110, shapeRadius = 0.04, gravity = 0, rotSpeed = 720,
+    velMin = Vector3(-0.20, -0.20, -0.20), velMax = Vector3(0.20, 0.20, 0.20),
     colors = {
-        { time = 0.0, color = Color(0.8, 0.3, 3.0, 1.0) },
-        { time = 1.0, color = Color(0.5, 0.2, 1.0, 0.0) },
+        { time = 0.0, color = Color(0.7, 0.5, 5.0, 1.0) },
+        { time = 0.3, color = Color(0.9, 0.6, 4.0, 0.9) },
+        { time = 0.6, color = Color(0.5, 0.3, 3.0, 0.5) },
+        { time = 1.0, color = Color(0.3, 0.1, 1.5, 0.0) },
     },
 }
 BULLET_VFX["splinter"] = {
-    tex = TEX.pfx_rock_break, tint = Color(0.8, 0.8, 0.8, 1),
-    maxParticles = 6, emitRate = 15, life = 0.15,
-    sizeMin = 0.025, sizeMax = 0.050, shapeRadius = 0.02, gravity = 0.2, rotSpeed = 120,
-    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    tex = TEX.pfx_rock_break, tint = Color(1.8, 1.2, 0.4, 1), additive = true,
+    maxParticles = 12, emitRate = 35, life = 0.18,
+    sizeMin = 0.030, sizeMax = 0.065, shapeRadius = 0.03, gravity = 0.8, rotSpeed = 280,
+    velMin = Vector3(-0.25, -0.15, -0.25), velMax = Vector3(0.25, 0.30, 0.25),
     colors = {
-        { time = 0.0, color = Color(1.0, 0.95, 0.85, 1.0) },
-        { time = 1.0, color = Color(0.5, 0.45, 0.40, 0.0) },
+        { time = 0.0, color = Color(2.5, 1.8, 0.6, 1.0) },
+        { time = 0.4, color = Color(2.0, 1.2, 0.3, 0.8) },
+        { time = 0.7, color = Color(1.2, 0.7, 0.2, 0.4) },
+        { time = 1.0, color = Color(0.5, 0.3, 0.1, 0.0) },
     },
 }
 BULLET_VFX["piercing_core"] = {
-    tex = TEX.bullet_trail, tint = Color(1.5, 1.5, 2.0, 1), additive = true,
-    maxParticles = 10, emitRate = 32, life = 0.12,
-    sizeMin = 0.020, sizeMax = 0.045, shapeRadius = 0.01, gravity = 0,
-    velMin = Vector3(-0.06, -0.06, -0.06), velMax = Vector3(0.06, 0.06, 0.06),
+    tex = TEX.bullet_trail, tint = Color(1.8, 2.0, 3.5, 1), additive = true,
+    maxParticles = 16, emitRate = 55, life = 0.10,
+    sizeMin = 0.018, sizeMax = 0.040, shapeRadius = 0.008, gravity = 0,
+    velMin = Vector3(-0.03, -0.03, -0.03), velMax = Vector3(0.03, 0.03, 0.03),
     colors = {
-        { time = 0.0, color = Color(1.5, 1.5, 2.5, 1.0) },
-        { time = 1.0, color = Color(0.8, 0.8, 1.5, 0.0) },
+        { time = 0.0, color = Color(2.5, 2.8, 5.0, 1.0) },
+        { time = 0.2, color = Color(2.0, 2.2, 4.0, 0.9) },
+        { time = 0.5, color = Color(1.2, 1.5, 3.0, 0.5) },
+        { time = 1.0, color = Color(0.5, 0.6, 1.5, 0.0) },
     },
 }
 BULLET_VFX["sniper_mod"] = {
-    tex = TEX.soft_spot, tint = Color(2.0, 0.1, 0.1, 1), additive = true,
-    maxParticles = 4, emitRate = 12, life = 0.18,
-    sizeMin = 0.015, sizeMax = 0.030, shapeRadius = 0.01, gravity = 0,
-    velMin = Vector3(-0.04, -0.04, -0.04), velMax = Vector3(0.04, 0.04, 0.04),
+    tex = TEX.pfx_tail, tint = Color(3.5, 0.2, 0.1, 1), additive = true,
+    maxParticles = 10, emitRate = 40, life = 0.14,
+    sizeMin = 0.012, sizeMax = 0.028, shapeRadius = 0.005, gravity = 0,
+    velMin = Vector3(-0.02, -0.02, -0.02), velMax = Vector3(0.02, 0.02, 0.02),
     colors = {
-        { time = 0.0, color = Color(2.0, 0.1, 0.1, 0.9) },
-        { time = 1.0, color = Color(1.0, 0.1, 0.1, 0.0) },
+        { time = 0.0, color = Color(4.0, 0.8, 0.3, 1.0) },
+        { time = 0.2, color = Color(3.5, 0.2, 0.1, 0.9) },
+        { time = 0.6, color = Color(2.0, 0.1, 0.05, 0.5) },
+        { time = 1.0, color = Color(0.8, 0.05, 0.02, 0.0) },
     },
 }
+-- 高爆圣器弹道: 火焰陨石拖尾，大颗粒翻滚燃烧
 BULLET_VFX["high_explosive"] = {
-    tex = TEX.pfx_fire_meteor, tint = Color(2.0, 0.8, 0.1, 1), additive = true,
-    maxParticles = 10, emitRate = 28, life = 0.13,
-    sizeMin = 0.040, sizeMax = 0.080, shapeRadius = 0.03, gravity = 0, rotSpeed = 90,
+    tex = TEX.pfx_fire_meteor, tint = Color(3.0, 1.5, 0.2, 1), additive = true,
+    maxParticles = 16, emitRate = 45, life = 0.18,
+    sizeMin = 0.050, sizeMax = 0.110, shapeRadius = 0.04, gravity = 0.3, rotSpeed = 240,
+    velMin = Vector3(-0.22, -0.15, -0.22), velMax = Vector3(0.22, 0.25, 0.22),
+    colors = {
+        { time = 0.0, color = Color(4.5, 3.0, 0.5, 1.0) },
+        { time = 0.2, color = Color(3.5, 1.8, 0.2, 0.9) },
+        { time = 0.5, color = Color(2.5, 0.8, 0.1, 0.6) },
+        { time = 0.8, color = Color(1.2, 0.3, 0.05, 0.3) },
+        { time = 1.0, color = Color(0.4, 0.1, 0.0, 0.0) },
+    },
+}
+-- 暴击装置弹道: 金色星芒闪烁拖尾，暗示致命一击
+BULLET_VFX["crit_device"] = {
+    tex = TEX.pfx_star_shine, tint = Color(4.0, 3.0, 0.3, 1), additive = true,
+    maxParticles = 10, emitRate = 35, life = 0.12,
+    sizeMin = 0.030, sizeMax = 0.070, shapeRadius = 0.02, gravity = 0, rotSpeed = 540,
     velMin = Vector3(-0.12, -0.12, -0.12), velMax = Vector3(0.12, 0.12, 0.12),
     colors = {
-        { time = 0.0, color = Color(3.0, 2.0, 0.2, 1.0) },
-        { time = 1.0, color = Color(0.5, 0.2, 0.1, 0.0) },
+        { time = 0.0, color = Color(5.0, 4.5, 1.0, 1.0) },
+        { time = 0.2, color = Color(4.5, 3.5, 0.3, 0.9) },
+        { time = 0.5, color = Color(3.0, 2.0, 0.1, 0.5) },
+        { time = 0.8, color = Color(1.5, 0.8, 0.0, 0.2) },
+        { time = 1.0, color = Color(0.5, 0.3, 0.0, 0.0) },
     },
 }
-BULLET_VFX["crit_device"] = {
-    tex = TEX.pfx_star_shine, tint = Color(3.0, 2.5, 0.2, 1), additive = true,
-    maxParticles = 6, emitRate = 18, life = 0.14,
-    sizeMin = 0.025, sizeMax = 0.055, shapeRadius = 0.02, gravity = 0, rotSpeed = 180,
-    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
-    colors = {
-        { time = 0.0, color = Color(4.0, 3.5, 0.3, 1.0) },
-        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
-    },
-}
+-- 元素核心弹道: 多元素交融光环，红→蓝→紫→绿循环
 BULLET_VFX["elemental_core"] = {
     tex = TEX.pfx_eletric_aura, additive = true,
-    maxParticles = 8, emitRate = 22, life = 0.12,
-    sizeMin = 0.030, sizeMax = 0.060, shapeRadius = 0.02, gravity = 0, rotSpeed = 200,
-    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    maxParticles = 14, emitRate = 42, life = 0.13,
+    sizeMin = 0.035, sizeMax = 0.075, shapeRadius = 0.03, gravity = 0, rotSpeed = 480,
+    velMin = Vector3(-0.16, -0.16, -0.16), velMax = Vector3(0.16, 0.16, 0.16),
     colors = {
-        { time = 0.0,  color = Color(3.0, 0.5, 0.1, 1.0) },
-        { time = 0.5,  color = Color(0.2, 0.5, 3.0, 1.0) },
-        { time = 1.0,  color = Color(0.8, 0.1, 3.0, 0.0) },
+        { time = 0.0, color = Color(4.0, 0.8, 0.2, 1.0) },
+        { time = 0.2, color = Color(3.0, 0.3, 3.5, 0.9) },
+        { time = 0.45, color = Color(0.3, 0.8, 4.0, 0.8) },
+        { time = 0.7, color = Color(0.5, 3.0, 0.5, 0.5) },
+        { time = 1.0, color = Color(1.0, 0.5, 2.0, 0.0) },
     },
 }
+-- 过载继电器弹道: 橙红电弧过载，高速旋转闪电
 BULLET_VFX["overload_relay"] = {
-    tex = TEX.pfx_lightning, tint = Color(3.0, 0.6, 0.1, 1), additive = true,
-    maxParticles = 8, emitRate = 26, life = 0.09,
-    sizeMin = 0.035, sizeMax = 0.065, shapeRadius = 0.03, gravity = 0, rotSpeed = 360,
+    tex = TEX.pfx_lightning, tint = Color(4.0, 1.0, 0.1, 1), additive = true,
+    maxParticles = 12, emitRate = 40, life = 0.10,
+    sizeMin = 0.040, sizeMax = 0.085, shapeRadius = 0.035, gravity = 0, rotSpeed = 800,
+    velMin = Vector3(-0.20, -0.20, -0.20), velMax = Vector3(0.20, 0.20, 0.20),
+    colors = {
+        { time = 0.0, color = Color(5.0, 2.0, 0.3, 1.0) },
+        { time = 0.2, color = Color(4.0, 1.0, 0.1, 0.9) },
+        { time = 0.5, color = Color(2.5, 0.5, 0.05, 0.6) },
+        { time = 0.8, color = Color(1.2, 0.2, 0.0, 0.3) },
+        { time = 1.0, color = Color(0.5, 0.1, 0.0, 0.0) },
+    },
+}
+-- 注能弹药弹道: 金黄能量脉冲环，聚拢收束
+BULLET_VFX["energy_ammo"] = {
+    tex = TEX.circle, tint = Color(3.5, 2.8, 0.3, 1), additive = true,
+    maxParticles = 12, emitRate = 38, life = 0.10,
+    sizeMin = 0.025, sizeMax = 0.060, shapeRadius = 0.03, gravity = 0, rotSpeed = 360,
     velMin = Vector3(-0.14, -0.14, -0.14), velMax = Vector3(0.14, 0.14, 0.14),
     colors = {
-        { time = 0.0, color = Color(3.5, 0.8, 0.1, 1.0) },
-        { time = 1.0, color = Color(1.0, 0.1, 0.0, 0.0) },
+        { time = 0.0, color = Color(4.5, 3.5, 0.5, 1.0) },
+        { time = 0.2, color = Color(3.8, 2.8, 0.3, 0.9) },
+        { time = 0.5, color = Color(2.5, 1.5, 0.1, 0.6) },
+        { time = 0.8, color = Color(1.2, 0.8, 0.0, 0.2) },
+        { time = 1.0, color = Color(0.5, 0.3, 0.0, 0.0) },
     },
 }
-BULLET_VFX["energy_ammo"] = {
-    tex = TEX.circle, tint = Color(2.5, 2.0, 0.2, 1), additive = true,
-    maxParticles = 6, emitRate = 18, life = 0.12,
-    sizeMin = 0.020, sizeMax = 0.045, shapeRadius = 0.02, gravity = 0,
-    velMin = Vector3(-0.08, -0.08, -0.08), velMax = Vector3(0.08, 0.08, 0.08),
-    colors = {
-        { time = 0.0, color = Color(3.0, 2.5, 0.2, 1.0) },
-        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
-    },
-}
+-- 蓄力击弹道: 蓝紫蓄能光芒，逐渐聚拢收缩
 BULLET_VFX["charged_hit"] = {
-    tex = TEX.pfx_light_spark, tint = Color(0.3, 0.6, 3.5, 1), additive = true,
-    maxParticles = 8, emitRate = 24, life = 0.13,
-    sizeMin = 0.025, sizeMax = 0.055, shapeRadius = 0.02, gravity = 0, rotSpeed = 150,
-    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    tex = TEX.pfx_light_spark, tint = Color(0.4, 0.8, 4.5, 1), additive = true,
+    maxParticles = 12, emitRate = 38, life = 0.14,
+    sizeMin = 0.030, sizeMax = 0.070, shapeRadius = 0.025, gravity = 0, rotSpeed = 320,
+    velMin = Vector3(-0.16, -0.16, -0.16), velMax = Vector3(0.16, 0.16, 0.16),
     colors = {
-        { time = 0.0, color = Color(0.4, 0.8, 4.5, 1.0) },
-        { time = 1.0, color = Color(0.4, 0.6, 2.0, 0.0) },
+        { time = 0.0, color = Color(0.8, 1.2, 5.5, 1.0) },
+        { time = 0.2, color = Color(0.5, 0.9, 4.5, 0.9) },
+        { time = 0.5, color = Color(0.6, 0.6, 3.0, 0.6) },
+        { time = 0.8, color = Color(0.4, 0.3, 1.8, 0.3) },
+        { time = 1.0, color = Color(0.2, 0.2, 0.8, 0.0) },
     },
 }
+-- 反馈线圈弹道: 暗紫漩涡能量扭曲
 BULLET_VFX["feedback_coil"] = {
-    tex = TEX.pfx_dark_swirl, tint = Color(0.8, 0.1, 2.8, 1), additive = true,
-    maxParticles = 8, emitRate = 22, life = 0.11,
-    sizeMin = 0.030, sizeMax = 0.060, shapeRadius = 0.02, gravity = 0, rotSpeed = 150,
-    velMin = Vector3(-0.10, -0.10, -0.10), velMax = Vector3(0.10, 0.10, 0.10),
+    tex = TEX.pfx_dark_swirl, tint = Color(1.2, 0.2, 3.5, 1), additive = true,
+    maxParticles = 12, emitRate = 36, life = 0.13,
+    sizeMin = 0.035, sizeMax = 0.075, shapeRadius = 0.025, gravity = 0, rotSpeed = 600,
+    velMin = Vector3(-0.14, -0.14, -0.14), velMax = Vector3(0.14, 0.14, 0.14),
     colors = {
-        { time = 0.0, color = Color(1.0, 0.1, 3.5, 1.0) },
-        { time = 1.0, color = Color(0.3, 0.0, 1.5, 0.0) },
+        { time = 0.0, color = Color(1.5, 0.3, 5.0, 1.0) },
+        { time = 0.2, color = Color(1.2, 0.2, 4.0, 0.9) },
+        { time = 0.5, color = Color(0.8, 0.1, 2.8, 0.6) },
+        { time = 0.8, color = Color(0.4, 0.05, 1.5, 0.3) },
+        { time = 1.0, color = Color(0.2, 0.0, 0.6, 0.0) },
     },
 }
 
@@ -1617,22 +1828,7 @@ BULLET_SHEET_VFX["corrosion"] = {
     file="ParticleFX1/Poison Cloud-Sheet.png", cols=4, rows=5, totalFrames=20,
     fps=18, size=0.35,
 }
-BULLET_SHEET_VFX["thunder"] = {
-    file="ParticleFX1/Eletric A-Sheet.png", cols=3, rows=3, totalFrames=9,
-    fps=24, size=0.42,
-}
-BULLET_SHEET_VFX["splinter"] = {
-    file="ParticleFX1/Spark3-Sheet.png", cols=5, rows=6, totalFrames=30,
-    fps=28, size=0.30,
-}
-BULLET_SHEET_VFX["piercing_core"] = {
-    file="ParticleFX1/Sparky Flame-Sheet.png", cols=5, rows=3, totalFrames=15,
-    fps=22, size=0.35,
-}
-BULLET_SHEET_VFX["sniper_mod"] = {
-    file="ParticleFX1/Spark2-Sheet.png", cols=5, rows=6, totalFrames=30,
-    fps=28, size=0.28,
-}
+
 BULLET_SHEET_VFX["high_explosive"] = {
     file="ParticleFX1/Fire2-Sheet.png", cols=5, rows=3, totalFrames=15,
     fps=22, size=0.50,
@@ -1667,158 +1863,231 @@ BULLET_SHEET_VFX["feedback_coil"] = {
 -- ============================================================================
 local HIT_VFX = {}
 
+-- 连射模块命中: 密集金色火花四射
 HIT_VFX["rapid_fire_module"] = {
-    tex = TEX.pfx_sparks, tint = Color(2.5, 1.8, 0.2, 1), additive = true,
-    maxParticles = 16, emitRate = 120, life = 0.18,
-    sizeMin = 0.035, sizeMax = 0.070, shapeRadius = 0.06, gravity = 0.4, rotSpeed = 240,
-    velMin = Vector3(-1.2, 0.2, -1.2), velMax = Vector3(1.2, 1.8, 1.2), ttl = 0.35,
+    tex = TEX.pfx_sparks, tint = Color(3.5, 2.5, 0.3, 1), additive = true,
+    maxParticles = 22, emitRate = 180, life = 0.20,
+    sizeMin = 0.040, sizeMax = 0.090, shapeRadius = 0.08, gravity = 0.6, rotSpeed = 400,
+    velMin = Vector3(-1.8, 0.3, -1.8), velMax = Vector3(1.8, 2.5, 1.8), ttl = 0.40,
     colors = {
-        { time = 0.0, color = Color(3.5, 3.0, 0.4, 1.0) },
-        { time = 1.0, color = Color(0.8, 0.4, 0.0, 0.0) },
+        { time = 0.0, color = Color(5.0, 4.0, 0.8, 1.0) },
+        { time = 0.2, color = Color(4.0, 3.0, 0.4, 0.9) },
+        { time = 0.5, color = Color(2.5, 1.5, 0.2, 0.5) },
+        { time = 0.8, color = Color(1.2, 0.6, 0.0, 0.2) },
+        { time = 1.0, color = Color(0.4, 0.2, 0.0, 0.0) },
     },
 }
+-- 火种圣器命中: 火焰爆裂，大面积燃烧升腾
 HIT_VFX["fire_seed"] = {
-    tex = TEX.pfx_fire1, tint = Color(1.5, 0.6, 0.1, 1),
-    maxParticles = 20, emitRate = 140, life = 0.45,
-    sizeMin = 0.080, sizeMax = 0.200, shapeRadius = 0.06, gravity = -0.3, rotSpeed = 90,
-    velMin = Vector3(-1.2, 0.3, -1.2), velMax = Vector3(1.2, 2.0, 1.2), ttl = 0.65,
+    tex = TEX.pfx_fire1, tint = Color(2.5, 1.0, 0.1, 1), additive = true,
+    maxParticles = 26, emitRate = 200, life = 0.45,
+    sizeMin = 0.100, sizeMax = 0.250, shapeRadius = 0.10, gravity = -0.5, rotSpeed = 120,
+    velMin = Vector3(-1.6, 0.5, -1.6), velMax = Vector3(1.6, 3.0, 1.6), ttl = 0.70,
     colors = {
-        { time = 0.0, color = Color(2.5, 1.2, 0.1, 1.0) },
-        { time = 0.4, color = Color(2.0, 0.5, 0.0, 0.8) },
-        { time = 1.0, color = Color(0.4, 0.1, 0.0, 0.0) },
+        { time = 0.0, color = Color(4.5, 2.5, 0.5, 1.0) },
+        { time = 0.15, color = Color(4.0, 1.5, 0.2, 1.0) },
+        { time = 0.4, color = Color(3.0, 0.8, 0.1, 0.7) },
+        { time = 0.7, color = Color(1.5, 0.3, 0.0, 0.3) },
+        { time = 1.0, color = Color(0.4, 0.08, 0.0, 0.0) },
     },
 }
+-- 冰晶圣器命中: 冰蓝碎冰爆裂+冰雾扩散
 HIT_VFX["ice_crystal"] = {
-    tex = TEX.pfx_icicle, tint = Color(0.5, 0.85, 2.0, 1),
-    maxParticles = 18, emitRate = 130, life = 0.50,
-    sizeMin = 0.050, sizeMax = 0.110, shapeRadius = 0.07, gravity = 0.3, rotSpeed = 90,
-    velMin = Vector3(-1.4, 0.2, -1.4), velMax = Vector3(1.4, 1.8, 1.4), ttl = 0.70,
+    tex = TEX.pfx_icicle, tint = Color(0.7, 1.5, 4.0, 1), additive = true,
+    maxParticles = 24, emitRate = 180, life = 0.45,
+    sizeMin = 0.060, sizeMax = 0.140, shapeRadius = 0.10, gravity = 0.5, rotSpeed = 250,
+    velMin = Vector3(-1.8, 0.3, -1.8), velMax = Vector3(1.8, 2.5, 1.8), ttl = 0.65,
     colors = {
-        { time = 0.0, color = Color(0.5, 0.9, 2.5, 1.0) },
-        { time = 1.0, color = Color(1.0, 1.2, 2.0, 0.0) },
+        { time = 0.0, color = Color(1.5, 2.5, 6.0, 1.0) },
+        { time = 0.15, color = Color(1.0, 2.0, 5.0, 1.0) },
+        { time = 0.4, color = Color(0.6, 1.5, 3.5, 0.7) },
+        { time = 0.7, color = Color(0.4, 1.0, 2.5, 0.3) },
+        { time = 1.0, color = Color(0.2, 0.6, 1.5, 0.0) },
     },
 }
+-- 腐蚀圣器命中: 毒绿酸液飞溅+腐蚀烟雾
 HIT_VFX["corrosion"] = {
-    tex = TEX.pfx_toxic, tint = Color(0.3, 1.2, 0.1, 1),
-    maxParticles = 16, emitRate = 110, life = 0.55,
-    sizeMin = 0.055, sizeMax = 0.110, shapeRadius = 0.06, gravity = 1.2,
-    velMin = Vector3(-0.8, 0.2, -0.8), velMax = Vector3(0.8, 1.4, 0.8), ttl = 0.75,
+    tex = TEX.pfx_toxic, tint = Color(0.5, 2.8, 0.2, 1), additive = true,
+    maxParticles = 22, emitRate = 160, life = 0.50,
+    sizeMin = 0.065, sizeMax = 0.150, shapeRadius = 0.09, gravity = 1.5, rotSpeed = 100,
+    velMin = Vector3(-1.2, 0.3, -1.2), velMax = Vector3(1.2, 2.0, 1.2), ttl = 0.75,
     colors = {
-        { time = 0.0, color = Color(0.3, 2.0, 0.1, 1.0) },
-        { time = 1.0, color = Color(0.1, 0.5, 0.0, 0.0) },
+        { time = 0.0, color = Color(0.6, 4.0, 0.4, 1.0) },
+        { time = 0.2, color = Color(0.4, 3.2, 0.2, 0.9) },
+        { time = 0.5, color = Color(0.3, 2.0, 0.15, 0.6) },
+        { time = 0.8, color = Color(0.15, 1.0, 0.05, 0.3) },
+        { time = 1.0, color = Color(0.05, 0.4, 0.0, 0.0) },
     },
 }
 HIT_VFX["thunder"] = {
-    tex = TEX.pfx_eletric_exp, tint = Color(0.8, 0.3, 2.0, 1), additive = true,
-    maxParticles = 14, emitRate = 120, life = 0.20,
-    sizeMin = 0.080, sizeMax = 0.180, shapeRadius = 0.10, gravity = 0, rotSpeed = 360,
-    velMin = Vector3(-1.6, -0.8, -1.6), velMax = Vector3(1.6, 1.6, 1.6), ttl = 0.40,
+    tex = TEX.pfx_eletric_exp, tint = Color(0.6, 0.4, 4.5, 1), additive = true,
+    maxParticles = 22, emitRate = 180, life = 0.22,
+    sizeMin = 0.100, sizeMax = 0.240, shapeRadius = 0.12, gravity = 0, rotSpeed = 600,
+    velMin = Vector3(-2.2, -1.2, -2.2), velMax = Vector3(2.2, 2.2, 2.2), ttl = 0.45,
     colors = {
-        { time = 0.0, color = Color(0.8, 0.3, 3.0, 1.0) },
-        { time = 1.0, color = Color(0.5, 0.2, 1.0, 0.0) },
+        { time = 0.0, color = Color(1.0, 0.8, 6.0, 1.0) },
+        { time = 0.15, color = Color(0.8, 0.5, 5.0, 1.0) },
+        { time = 0.4, color = Color(0.6, 0.3, 3.5, 0.7) },
+        { time = 0.7, color = Color(0.4, 0.2, 2.0, 0.3) },
+        { time = 1.0, color = Color(0.2, 0.1, 1.0, 0.0) },
     },
 }
 HIT_VFX["splinter"] = {
-    tex = TEX.pfx_rock_break, tint = Color(0.8, 0.8, 0.8, 1),
-    maxParticles = 20, emitRate = 130, life = 0.55,
-    sizeMin = 0.055, sizeMax = 0.110, shapeRadius = 0.08, gravity = 1.2, rotSpeed = 220,
-    velMin = Vector3(-1.4, 0.3, -1.4), velMax = Vector3(1.4, 2.0, 1.4), ttl = 0.70,
+    tex = TEX.pfx_rock_break, tint = Color(2.2, 1.5, 0.5, 1), additive = true,
+    maxParticles = 28, emitRate = 200, life = 0.50,
+    sizeMin = 0.065, sizeMax = 0.140, shapeRadius = 0.10, gravity = 2.5, rotSpeed = 350,
+    velMin = Vector3(-2.0, 0.8, -2.0), velMax = Vector3(2.0, 3.5, 2.0), ttl = 0.70,
     colors = {
-        { time = 0.0, color = Color(1.0, 0.95, 0.85, 1.0) },
-        { time = 1.0, color = Color(0.5, 0.45, 0.40, 0.0) },
+        { time = 0.0, color = Color(3.0, 2.2, 0.8, 1.0) },
+        { time = 0.2, color = Color(2.5, 1.6, 0.4, 0.9) },
+        { time = 0.5, color = Color(1.5, 0.9, 0.2, 0.6) },
+        { time = 0.8, color = Color(0.8, 0.5, 0.1, 0.3) },
+        { time = 1.0, color = Color(0.3, 0.2, 0.05, 0.0) },
     },
 }
 HIT_VFX["piercing_core"] = {
-    tex = TEX.bullet_trail, tint = Color(1.5, 1.5, 2.0, 1), additive = true,
-    maxParticles = 12, emitRate = 100, life = 0.22,
-    sizeMin = 0.035, sizeMax = 0.070, shapeRadius = 0.05, gravity = 0,
-    velMin = Vector3(-1.0, 0.2, -1.0), velMax = Vector3(1.0, 1.6, 1.0), ttl = 0.40,
+    tex = TEX.pfx_sparks, tint = Color(2.0, 2.2, 4.0, 1), additive = true,
+    maxParticles = 18, emitRate = 160, life = 0.18,
+    sizeMin = 0.040, sizeMax = 0.090, shapeRadius = 0.04, gravity = 0, rotSpeed = 400,
+    velMin = Vector3(-1.5, 0.5, -1.5), velMax = Vector3(1.5, 2.5, 1.5), ttl = 0.35,
     colors = {
-        { time = 0.0, color = Color(1.5, 1.5, 2.5, 1.0) },
-        { time = 1.0, color = Color(0.8, 0.8, 1.5, 0.0) },
+        { time = 0.0, color = Color(3.0, 3.5, 6.0, 1.0) },
+        { time = 0.15, color = Color(2.5, 2.8, 5.0, 1.0) },
+        { time = 0.4, color = Color(1.5, 1.8, 3.5, 0.7) },
+        { time = 0.7, color = Color(0.8, 1.0, 2.0, 0.3) },
+        { time = 1.0, color = Color(0.3, 0.4, 1.0, 0.0) },
     },
 }
 HIT_VFX["sniper_mod"] = {
-    tex = TEX.soft_spot, tint = Color(2.0, 0.1, 0.1, 1), additive = true,
-    maxParticles = 10, emitRate = 90, life = 0.28,
-    sizeMin = 0.040, sizeMax = 0.090, shapeRadius = 0.04, gravity = 0,
-    velMin = Vector3(-0.6, 0.1, -0.6), velMax = Vector3(0.6, 1.2, 0.6), ttl = 0.45,
+    tex = TEX.pfx_sparky_flame, tint = Color(3.5, 0.3, 0.1, 1), additive = true,
+    maxParticles = 16, emitRate = 140, life = 0.25,
+    sizeMin = 0.050, sizeMax = 0.120, shapeRadius = 0.03, gravity = 0, rotSpeed = 200,
+    velMin = Vector3(-0.8, 0.2, -0.8), velMax = Vector3(0.8, 1.8, 0.8), ttl = 0.40,
     colors = {
-        { time = 0.0, color = Color(2.0, 0.1, 0.1, 0.9) },
-        { time = 1.0, color = Color(1.0, 0.1, 0.1, 0.0) },
+        { time = 0.0, color = Color(5.0, 1.5, 0.5, 1.0) },
+        { time = 0.15, color = Color(4.0, 0.5, 0.2, 1.0) },
+        { time = 0.4, color = Color(3.0, 0.2, 0.1, 0.7) },
+        { time = 0.7, color = Color(1.5, 0.1, 0.05, 0.3) },
+        { time = 1.0, color = Color(0.5, 0.05, 0.02, 0.0) },
     },
 }
+-- 高爆圣器命中: 大范围火焰爆炸冲击波
 HIT_VFX["high_explosive"] = {
-    tex = TEX.pfx_fire_meteor, tint = Color(2.0, 0.8, 0.1, 1), additive = true,
-    maxParticles = 28, emitRate = 160, life = 0.40,
-    sizeMin = 0.120, sizeMax = 0.280, shapeRadius = 0.12, gravity = 0, rotSpeed = 140,
-    velMin = Vector3(-1.8, -0.5, -1.8), velMax = Vector3(1.8, 2.5, 1.8), ttl = 0.75,
+    tex = TEX.pfx_fire_meteor, tint = Color(3.5, 1.5, 0.2, 1), additive = true,
+    maxParticles = 36, emitRate = 250, life = 0.45,
+    sizeMin = 0.150, sizeMax = 0.350, shapeRadius = 0.18, gravity = -0.2, rotSpeed = 180,
+    velMin = Vector3(-2.5, -0.8, -2.5), velMax = Vector3(2.5, 3.5, 2.5), ttl = 0.80,
     colors = {
-        { time = 0.0, color = Color(3.0, 2.0, 0.2, 1.0) },
-        { time = 0.3, color = Color(2.5, 0.8, 0.0, 0.8) },
-        { time = 1.0, color = Color(0.5, 0.2, 0.1, 0.0) },
+        { time = 0.0, color = Color(6.0, 4.0, 1.0, 1.0) },
+        { time = 0.1, color = Color(5.0, 2.5, 0.3, 1.0) },
+        { time = 0.3, color = Color(3.5, 1.2, 0.1, 0.8) },
+        { time = 0.6, color = Color(2.0, 0.5, 0.05, 0.5) },
+        { time = 0.85, color = Color(0.8, 0.2, 0.0, 0.2) },
+        { time = 1.0, color = Color(0.3, 0.08, 0.0, 0.0) },
     },
 }
+-- 暴击装置命中: 金色星芒爆发+白色闪光核心
 HIT_VFX["crit_device"] = {
-    tex = TEX.pfx_star_shine, tint = Color(3.0, 2.5, 0.2, 1), additive = true,
-    maxParticles = 14, emitRate = 110, life = 0.50,
-    sizeMin = 0.060, sizeMax = 0.140, shapeRadius = 0.06, gravity = 0, rotSpeed = 180,
-    velMin = Vector3(-1.2, 0.2, -1.2), velMax = Vector3(1.2, 2.0, 1.2), ttl = 0.70,
+    tex = TEX.pfx_star_shine, tint = Color(4.5, 3.5, 0.5, 1), additive = true,
+    maxParticles = 20, emitRate = 160, life = 0.40,
+    sizeMin = 0.080, sizeMax = 0.200, shapeRadius = 0.08, gravity = 0, rotSpeed = 500,
+    velMin = Vector3(-1.6, 0.3, -1.6), velMax = Vector3(1.6, 2.8, 1.6), ttl = 0.60,
     colors = {
-        { time = 0.0, color = Color(4.0, 3.5, 0.3, 1.0) },
-        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
+        { time = 0.0, color = Color(6.0, 5.5, 2.0, 1.0) },
+        { time = 0.1, color = Color(5.5, 4.5, 0.8, 1.0) },
+        { time = 0.3, color = Color(4.0, 3.0, 0.3, 0.8) },
+        { time = 0.6, color = Color(2.5, 1.5, 0.1, 0.4) },
+        { time = 0.85, color = Color(1.2, 0.6, 0.0, 0.15) },
+        { time = 1.0, color = Color(0.4, 0.2, 0.0, 0.0) },
     },
 }
+-- 元素核心命中: 多元素交汇爆发，红蓝紫绿循环闪烁
 HIT_VFX["elemental_core"] = {
     tex = TEX.pfx_eletric_aura, additive = true,
-    maxParticles = 16, emitRate = 120, life = 0.35,
-    sizeMin = 0.070, sizeMax = 0.150, shapeRadius = 0.08, gravity = 0, rotSpeed = 200,
-    velMin = Vector3(-1.4, -0.4, -1.4), velMax = Vector3(1.4, 1.4, 1.4), ttl = 0.60,
+    maxParticles = 24, emitRate = 180, life = 0.38,
+    sizeMin = 0.080, sizeMax = 0.180, shapeRadius = 0.12, gravity = 0, rotSpeed = 450,
+    velMin = Vector3(-2.0, -0.6, -2.0), velMax = Vector3(2.0, 2.0, 2.0), ttl = 0.65,
     colors = {
-        { time = 0.0,  color = Color(3.0, 0.5, 0.1, 1.0) },
-        { time = 0.33, color = Color(0.2, 0.5, 3.0, 1.0) },
-        { time = 0.67, color = Color(0.8, 0.1, 3.0, 1.0) },
-        { time = 1.0,  color = Color(0.2, 2.5, 0.2, 0.0) },
+        { time = 0.0, color = Color(5.0, 1.0, 0.3, 1.0) },
+        { time = 0.15, color = Color(3.5, 0.5, 4.5, 1.0) },
+        { time = 0.35, color = Color(0.5, 1.2, 5.0, 0.9) },
+        { time = 0.55, color = Color(0.8, 4.0, 0.8, 0.7) },
+        { time = 0.75, color = Color(3.0, 2.0, 0.3, 0.4) },
+        { time = 1.0, color = Color(0.5, 0.5, 1.5, 0.0) },
     },
 }
+-- 过载继电器命中: 橙红电弧过载爆裂+火花飞溅
 HIT_VFX["overload_relay"] = {
-    tex = TEX.pfx_eletric_exp, tint = Color(3.0, 0.6, 0.1, 1), additive = true,
-    maxParticles = 14, emitRate = 120, life = 0.22,
-    sizeMin = 0.075, sizeMax = 0.160, shapeRadius = 0.10, gravity = 0, rotSpeed = 360,
-    velMin = Vector3(-1.8, -1.0, -1.8), velMax = Vector3(1.8, 1.8, 1.8), ttl = 0.45,
+    tex = TEX.pfx_eletric_exp, tint = Color(4.5, 1.2, 0.2, 1), additive = true,
+    maxParticles = 20, emitRate = 170, life = 0.25,
+    sizeMin = 0.090, sizeMax = 0.200, shapeRadius = 0.12, gravity = 0, rotSpeed = 700,
+    velMin = Vector3(-2.2, -1.2, -2.2), velMax = Vector3(2.2, 2.2, 2.2), ttl = 0.50,
     colors = {
-        { time = 0.0, color = Color(3.5, 0.8, 0.1, 1.0) },
-        { time = 1.0, color = Color(1.0, 0.1, 0.0, 0.0) },
+        { time = 0.0, color = Color(6.0, 2.5, 0.5, 1.0) },
+        { time = 0.15, color = Color(5.0, 1.5, 0.2, 1.0) },
+        { time = 0.4, color = Color(3.0, 0.8, 0.1, 0.7) },
+        { time = 0.7, color = Color(1.5, 0.3, 0.0, 0.3) },
+        { time = 1.0, color = Color(0.5, 0.1, 0.0, 0.0) },
     },
 }
+-- 棱镜圣器命中: 七彩棱镜折射爆裂 — 彩虹光芒四射+白色闪光核心
+HIT_VFX["prism"] = {
+    tex = TEX.pfx_star_shine, tint = Color(2.0, 2.0, 2.0, 1), additive = true,
+    maxParticles = 24, emitRate = 180, life = 0.35,
+    sizeMin = 0.060, sizeMax = 0.150, shapeRadius = 0.08, gravity = -0.3, rotSpeed = 300,
+    velMin = Vector3(-1.8, -0.5, -1.8), velMax = Vector3(1.8, 2.0, 1.8), ttl = 0.55,
+    colors = {
+        { time = 0.0, color = Color(4.0, 4.0, 5.0, 1.0) },
+        { time = 0.1, color = Color(3.0, 1.0, 4.0, 1.0) },
+        { time = 0.25, color = Color(1.0, 3.0, 4.0, 0.9) },
+        { time = 0.45, color = Color(2.0, 3.5, 1.0, 0.7) },
+        { time = 0.65, color = Color(3.5, 2.0, 0.5, 0.4) },
+        { time = 0.85, color = Color(2.0, 0.5, 3.0, 0.2) },
+        { time = 1.0, color = Color(0.5, 0.5, 1.0, 0.0) },
+    },
+}
+-- 注能弹药命中: 金黄能量脉冲爆发+环形扩散
 HIT_VFX["energy_ammo"] = {
-    tex = TEX.circle, tint = Color(2.5, 2.0, 0.2, 1), additive = true,
-    maxParticles = 12, emitRate = 100, life = 0.32,
-    sizeMin = 0.050, sizeMax = 0.100, shapeRadius = 0.06, gravity = 0,
-    velMin = Vector3(-1.0, 0.1, -1.0), velMax = Vector3(1.0, 1.6, 1.0), ttl = 0.55,
+    tex = TEX.circle, tint = Color(3.5, 2.8, 0.3, 1), additive = true,
+    maxParticles = 20, emitRate = 160, life = 0.35,
+    sizeMin = 0.065, sizeMax = 0.160, shapeRadius = 0.10, gravity = 0, rotSpeed = 400,
+    velMin = Vector3(-1.8, -0.5, -1.8), velMax = Vector3(1.8, 2.0, 1.8), ttl = 0.55,
     colors = {
-        { time = 0.0, color = Color(3.0, 2.5, 0.2, 1.0) },
-        { time = 1.0, color = Color(1.5, 1.0, 0.0, 0.0) },
+        { time = 0.0, color = Color(5.5, 4.5, 1.0, 1.0) },
+        { time = 0.15, color = Color(4.5, 3.5, 0.5, 1.0) },
+        { time = 0.4, color = Color(3.0, 2.0, 0.2, 0.7) },
+        { time = 0.7, color = Color(1.5, 1.0, 0.05, 0.3) },
+        { time = 1.0, color = Color(0.5, 0.3, 0.0, 0.0) },
     },
 }
+-- 蓄力击命中: 蓝紫能量集中释放+向心收缩后爆裂
 HIT_VFX["charged_hit"] = {
-    tex = TEX.pfx_light_spark, tint = Color(0.3, 0.6, 3.5, 1), additive = true,
-    maxParticles = 16, emitRate = 120, life = 0.40,
-    sizeMin = 0.060, sizeMax = 0.130, shapeRadius = 0.08, gravity = -0.2, rotSpeed = 150,
-    velMin = Vector3(-1.4, 0.2, -1.4), velMax = Vector3(1.4, 2.2, 1.4), ttl = 0.65,
+    tex = TEX.pfx_light_spark, tint = Color(0.5, 0.9, 4.5, 1), additive = true,
+    maxParticles = 22, emitRate = 170, life = 0.42,
+    sizeMin = 0.075, sizeMax = 0.180, shapeRadius = 0.10, gravity = -0.3, rotSpeed = 380,
+    velMin = Vector3(-1.8, 0.3, -1.8), velMax = Vector3(1.8, 2.8, 1.8), ttl = 0.65,
     colors = {
-        { time = 0.0, color = Color(0.4, 0.8, 4.5, 1.0) },
-        { time = 1.0, color = Color(0.4, 0.6, 2.0, 0.0) },
+        { time = 0.0, color = Color(1.2, 1.8, 6.5, 1.0) },
+        { time = 0.15, color = Color(0.8, 1.2, 5.5, 1.0) },
+        { time = 0.35, color = Color(1.0, 0.8, 4.0, 0.8) },
+        { time = 0.6, color = Color(0.6, 0.5, 2.5, 0.4) },
+        { time = 0.85, color = Color(0.3, 0.3, 1.5, 0.15) },
+        { time = 1.0, color = Color(0.15, 0.15, 0.6, 0.0) },
     },
 }
+-- 反馈线圈命中: 暗紫漩涡能量内爆+扭曲波纹扩散
 HIT_VFX["feedback_coil"] = {
-    tex = TEX.pfx_dark_swirl, tint = Color(0.8, 0.1, 2.8, 1), additive = true,
-    maxParticles = 16, emitRate = 120, life = 0.45,
-    sizeMin = 0.070, sizeMax = 0.150, shapeRadius = 0.10, gravity = 0, rotSpeed = 150,
-    velMin = Vector3(-1.6, -0.3, -1.6), velMax = Vector3(1.6, 1.6, 1.6), ttl = 0.70,
+    tex = TEX.pfx_dark_swirl, tint = Color(1.2, 0.2, 3.5, 1), additive = true,
+    maxParticles = 22, emitRate = 160, life = 0.48,
+    sizeMin = 0.085, sizeMax = 0.200, shapeRadius = 0.12, gravity = 0, rotSpeed = 650,
+    velMin = Vector3(-1.8, -0.6, -1.8), velMax = Vector3(1.8, 1.8, 1.8), ttl = 0.72,
     colors = {
-        { time = 0.0, color = Color(1.0, 0.1, 3.5, 1.0) },
-        { time = 1.0, color = Color(0.3, 0.0, 1.5, 0.0) },
+        { time = 0.0, color = Color(2.0, 0.4, 6.0, 1.0) },
+        { time = 0.15, color = Color(1.5, 0.3, 5.0, 1.0) },
+        { time = 0.35, color = Color(1.0, 0.15, 3.5, 0.8) },
+        { time = 0.6, color = Color(0.6, 0.08, 2.2, 0.5) },
+        { time = 0.85, color = Color(0.3, 0.03, 1.2, 0.2) },
+        { time = 1.0, color = Color(0.1, 0.0, 0.4, 0.0) },
     },
 }
 
@@ -1850,26 +2119,7 @@ SHEET_VFX["corrosion"] = {
     file="ParticleFX1/Poison Cloud-Sheet.png", cols=4, rows=5, totalFrames=20,
     fps=18, size=1.5,
 }
--- 雷电命中（thunder）: Eletric A-Sheet 3x3=9帧
-SHEET_VFX["thunder"] = {
-    file="ParticleFX1/Eletric A-Sheet.png", cols=3, rows=3, totalFrames=9,
-    fps=18, size=1.8,
-}
--- 碎片命中（splinter）: Spark1-Sheet 5x6=30帧
-SHEET_VFX["splinter"] = {
-    file="ParticleFX1/Spark1-Sheet.png", cols=5, rows=6, totalFrames=30,
-    fps=24, size=1.2,
-}
--- 穿甲命中（piercing_core）: Splatter-Sheet 5x6=30帧
-SHEET_VFX["piercing_core"] = {
-    file="ParticleFX1/Splatter-Sheet.png", cols=5, rows=6, totalFrames=30,
-    fps=24, size=1.3,
-}
--- 狙击命中（sniper_mod）: Spark2-Sheet 5x6=30帧（大爆炸）
-SHEET_VFX["sniper_mod"] = {
-    file="ParticleFX1/Spark2-Sheet.png", cols=5, rows=6, totalFrames=30,
-    fps=20, size=2.0,
-}
+
 -- 高爆命中（high_explosive）: Fire2-Sheet 5x3=15帧
 SHEET_VFX["high_explosive"] = {
     file="ParticleFX1/Fire2-Sheet.png", cols=5, rows=3, totalFrames=15,

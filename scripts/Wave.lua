@@ -1,5 +1,5 @@
 -- ============================================================================
--- Wave.lua — 程序化无限波次系统 (大波次/小波次 + 径向刷新 + 指示器)
+-- Wave.lua — 关卡制波次系统 (每关卡=8小波, 路径刷怪, Boss, 精英)
 -- ============================================================================
 
 local Cfg = require("Config")
@@ -10,14 +10,14 @@ local Monster = require("Monster")
 local Artifact = require("Artifact")
 local EnergyTower = require("EnergyTower")
 local GameUI = require("GameUI")
+local LevelData = require("LevelData")
 
 local M = {}
 
 -- ============================================================================
--- 怪物池 (按大波次阶段解锁)
+-- 怪物池 (按关卡阶段解锁)
 -- ============================================================================
 
--- 每个大波次阶段可用的普通怪物 ID
 local WAVE_POOLS = {
     [1] = { "walker", "swarm" },
     [2] = { "walker", "swarm", "sprinter" },
@@ -26,7 +26,6 @@ local WAVE_POOLS = {
     [5] = { "walker", "swarm", "sprinter", "shellbeast", "shielded", "energy_devourer" },
 }
 
--- 精英词缀池 (按大波次解锁)
 local AFFIX_POOLS = {
     [1] = {},
     [2] = { "thick_armor" },
@@ -35,188 +34,21 @@ local AFFIX_POOLS = {
     [5] = { "thick_armor", "swift", "burn_resist", "energy_drinker" },
 }
 
---- 获取当前大波次对应的怪物池
-local function GetPool(bigWave)
-    local idx = math.min(bigWave, #WAVE_POOLS)
+local function GetPool(level)
+    local idx = math.min(level, #WAVE_POOLS)
     return WAVE_POOLS[idx]
 end
 
---- 获取当前大波次对应的词缀池
-local function GetAffixPool(bigWave)
-    local idx = math.min(bigWave, #AFFIX_POOLS)
+local function GetAffixPool(level)
+    local idx = math.min(level, #AFFIX_POOLS)
     return AFFIX_POOLS[idx]
-end
-
--- ============================================================================
--- 大波次出怪方向系统
--- ============================================================================
-
--- 当前大波次固定的3个出怪方向角度 (弧度), 整个大波次不变
-local bigWaveAngles_ = {}
-
--- 上一小波实际使用的活跃方向索引集合 (在 bigWaveAngles_ 中的下标)
--- 用于保证相邻小波最多变更1个位置
-local prevActiveIndices_ = {}
-
---- 为新大波次生成3个尽量均匀分布的随机角度
-local function GenerateBigWaveAngles()
-    bigWaveAngles_ = {}
-    prevActiveIndices_ = {}
-    local minSep = math.rad(90)  -- 最小间隔90°，保证分散
-    for attempt = 1, 100 do
-        local angles = {}
-        local ok = true
-        for i = 1, 3 do
-            local a
-            for _ = 1, 30 do
-                a = math.random() * math.pi * 2
-                local valid = true
-                for _, ea in ipairs(angles) do
-                    local diff = math.abs(a - ea)
-                    if diff > math.pi then diff = math.pi * 2 - diff end
-                    if diff < minSep then valid = false; break end
-                end
-                if valid then break end
-            end
-            table.insert(angles, a)
-        end
-        -- 验证3个角度互相满足间隔
-        for i = 1, 3 do
-            for j = i + 1, 3 do
-                local diff = math.abs(angles[i] - angles[j])
-                if diff > math.pi then diff = math.pi * 2 - diff end
-                if diff < minSep then ok = false; break end
-            end
-            if not ok then break end
-        end
-        if ok then
-            bigWaveAngles_ = angles
-            return
-        end
-    end
-    -- 回退: 均匀3等分 + 小随机偏移
-    for i = 1, 3 do
-        bigWaveAngles_[i] = (i - 1) * (math.pi * 2 / 3) + (math.random() - 0.5) * math.rad(30)
-    end
-end
-
---- 决定本小波次使用几个活跃方向 (1-3, 越到后面越多)
-local function GetActiveCountForSmallWave(smallWave, bigWave)
-    -- 1.1~1.2 用1个, 1.3~1.5 用1-2个, 1.6+ 可以用1-3个
-    -- 整体随着大波次进展，平均活跃数增加
-    local maxActive = math.min(3, 1 + math.floor((smallWave - 1) / 2) + math.floor((bigWave - 1) / 2))
-    maxActive = math.min(3, maxActive)
-    local minActive = math.max(1, maxActive - 1)
-    return math.random(minActive, maxActive)
-end
-
---- 从3个固定方向中选择本小波次的活跃方向索引集合
---- 规则: 与上一小波最多变更1个位置 (增加/减少/替换)
-local function PickActiveIndices(smallWave, bigWave)
-    local targetCount = GetActiveCountForSmallWave(smallWave, bigWave)
-    
-    if #prevActiveIndices_ == 0 then
-        -- 首小波: 直接随机选 targetCount 个
-        local all = {1, 2, 3}
-        -- 洗牌
-        for i = 3, 2, -1 do
-            local j = math.random(1, i)
-            all[i], all[j] = all[j], all[i]
-        end
-        local result = {}
-        for i = 1, targetCount do result[i] = all[i] end
-        table.sort(result)
-        return result
-    end
-
-    -- 基于 prevActiveIndices_ 最多变更1个
-    local prev = {}
-    for _, v in ipairs(prevActiveIndices_) do prev[v] = true end
-    local prevList = {}
-    for _, v in ipairs(prevActiveIndices_) do table.insert(prevList, v) end
-
-    local allIndices = {1, 2, 3}
-    local notUsed = {}
-    for _, v in ipairs(allIndices) do
-        if not prev[v] then table.insert(notUsed, v) end
-    end
-
-    -- 决定操作类型
-    local ops = {}
-    -- 如果数量不变: 可以保持 or 替换1个
-    if targetCount == #prevList then
-        table.insert(ops, "keep")
-        if #notUsed > 0 and #prevList > 0 then table.insert(ops, "replace") end
-    elseif targetCount > #prevList then
-        -- 增加1个 (只允许+1)
-        if #notUsed > 0 then table.insert(ops, "add") end
-        -- 或者替换1个 (保持数量)
-        if #notUsed > 0 then table.insert(ops, "replace") end
-    else
-        -- 减少1个 (只允许-1)
-        if #prevList > 1 then table.insert(ops, "remove") end
-        -- 或者替换1个 (保持数量)
-        if #notUsed > 0 then table.insert(ops, "replace") end
-    end
-
-    if #ops == 0 then
-        -- 兜底: 保持
-        local result = {}
-        for _, v in ipairs(prevList) do table.insert(result, v) end
-        table.sort(result)
-        return result
-    end
-
-    local op = ops[math.random(1, #ops)]
-    local result = {}
-
-    if op == "keep" then
-        for _, v in ipairs(prevList) do table.insert(result, v) end
-    elseif op == "add" then
-        for _, v in ipairs(prevList) do table.insert(result, v) end
-        -- 从 notUsed 随机选一个加入
-        local pick = notUsed[math.random(1, #notUsed)]
-        table.insert(result, pick)
-    elseif op == "remove" then
-        -- 随机移除一个
-        local removeIdx = math.random(1, #prevList)
-        for i, v in ipairs(prevList) do
-            if i ~= removeIdx then table.insert(result, v) end
-        end
-    elseif op == "replace" then
-        -- 随机替换一个: 从 prevList 移除一个, 从 notUsed 加入一个
-        local removeIdx = math.random(1, #prevList)
-        local addPick = notUsed[math.random(1, #notUsed)]
-        for i, v in ipairs(prevList) do
-            if i ~= removeIdx then table.insert(result, v) end
-        end
-        table.insert(result, addPick)
-    end
-
-    table.sort(result)
-    return result
-end
-
---- 获取当前大波次的3个固定方向 (供 Scene.lua 渲染用)
-function M.GetBigWaveAngles()
-    return bigWaveAngles_
-end
-
---- 获取当前小波次的活跃方向角度列表 (供 Scene.lua 渲染用)
-function M.GetActiveSpawnAngles()
-    local angles = {}
-    for _, idx in ipairs(prevActiveIndices_) do
-        table.insert(angles, bigWaveAngles_[idx])
-    end
-    return angles
 end
 
 -- ============================================================================
 -- HP 缩放公式
 -- ============================================================================
 
---- 计算 HP 缩放因子 (基于全局波次)
---- 公式: 1.0 + A * sqrt(w-1) + B * (w-1)
+--- 计算 HP 缩放因子
 --- @param globalWave number 全局波次 (1-based)
 --- @param isBoss boolean 是否为 Boss
 --- @return number 缩放因子
@@ -231,42 +63,95 @@ function M.HPScaleFactor(globalWave, isBoss)
 end
 
 -- ============================================================================
--- 径向刷新：扇区计算
+-- 当前关卡数据缓存
 -- ============================================================================
 
---- 获取当前大波次允许的最大刷新点数
-local function GetMaxSpawnPoints(bigWave)
-    local tbl = CONFIG.MaxSpawnPoints
-    local idx = math.min(bigWave, #tbl)
-    return tbl[idx]
+local currentLevelData_ = nil   -- 当前关卡的路径配置
+
+--- 获取当前关卡路径数据
+function M.GetCurrentLevelData()
+    return currentLevelData_
 end
 
---- 生成本小波次的刷新扇区列表
---- 基于大波次固定3方向, 每小波选1-3个活跃方向, 相邻小波最多变1个
---- @return table[] sectors { {angle, enemyId, count, interval, delay, eliteAffixes}, ... }
-local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
-    local pool = GetPool(bigWave)
-    local affixPool = GetAffixPool(bigWave)
+--- 加载关卡数据
+local function LoadLevelData(level)
+    currentLevelData_ = LevelData.GetLevel(level)
+    print(string.format("[Wave] Level %d loaded: \"%s\" (%d paths)",
+        level, currentLevelData_.name, #currentLevelData_.paths))
+end
+
+-- ============================================================================
+-- 路径起点刷怪: 在路径第一个航点附近, 沿路径宽度随机分布
+-- ============================================================================
+
+--- 在路径起点附近生成随机出生位置
+--- @param path table 路径数据 { width, waypoints }
+--- @return number spawnX, number spawnZ
+local function RandomSpawnOnPath(path)
+    local wp1 = path.waypoints[1]
+    local wp2 = path.waypoints[2]
+    if not wp1 then return 0, 0 end
+    if not wp2 then return wp1.x, wp1.z end
+
+    -- 路径方向
+    local dx = wp2.x - wp1.x
+    local dz = wp2.z - wp1.z
+    local len = math.sqrt(dx * dx + dz * dz)
+    if len < 0.01 then return wp1.x, wp1.z end
+
+    -- 垂直方向 (路径宽度方向)
+    local perpX = -dz / len
+    local perpZ =  dx / len
+
+    -- 在起点位置 + 路径宽度范围内随机
+    local halfW = path.width * 0.5
+    local offset = (math.random() - 0.5) * halfW * 2  -- -halfW ~ +halfW
+    -- 同时沿路径方向稍微散开 (避免全部挤在同一点)
+    local alongOffset = math.random() * 3.0  -- 沿路径方向随机 0~3 格
+
+    local sx = wp1.x + perpX * offset - (dx / len) * alongOffset
+    local sz = wp1.z + perpZ * offset - (dz / len) * alongOffset
+
+    return sx, sz
+end
+
+--- 将路径航点转换为 Monster.lua 使用的 pathData 格式 {{x,z},...}
+--- @param path table 路径数据
+--- @return table pathData 航点数组 {{x,z},...}
+local function BuildPathData(path)
+    local data = {}
+    for _, wp in ipairs(path.waypoints) do
+        table.insert(data, { wp.x, wp.z })
+    end
+    return data
+end
+
+-- ============================================================================
+-- 刷新扇区生成 (基于路径)
+-- ============================================================================
+
+--- 每小波基础怪物数量 (关卡制: 怪物更多但更慢)
+local function BaseMonsterCount(globalWave)
+    return math.min(80, math.floor(8 + globalWave * 2.0))
+end
+
+--- 生成本小波次的刷新配置 (基于关卡路径)
+--- @return table[] groups { {pathIdx, enemyId, count, interval, delay, eliteAffixes, isBoss}, ... }
+local function GenerateSpawnGroups(level, smallWave, globalWave)
+    local pool = GetPool(level)
+    local affixPool = GetAffixPool(level)
+    local levelData = currentLevelData_
+    local numPaths = #levelData.paths
 
     local isBossWave = (smallWave == CONFIG.MiniBossSubWave or smallWave == CONFIG.BigBossSubWave)
 
-    --- 决定普通波怪物数量 (随波次递增)
-    local function BaseMonsterCount()
-        return math.min(60, math.floor(5 + globalWave * 1.5))
-    end
-
-    local sectors = {}
+    local groups = {}
 
     if isBossWave then
-        -- Boss 波: Boss 从一个活跃方向出现, 伴随怪从其他活跃方向出现
-        local activeIndices = PickActiveIndices(smallWave, bigWave)
-        prevActiveIndices_ = activeIndices
-
+        -- Boss 从第一条路径出现
         local bossId = (smallWave == CONFIG.MiniBossSubWave) and "shatter_titan" or "line_devourer"
-        -- Boss 使用第1个活跃方向
-        local bossAngle = bigWaveAngles_[activeIndices[1]]
-        table.insert(sectors, {
-            angle = bossAngle,
+        table.insert(groups, {
+            pathIdx = 1,
             enemyId = bossId,
             count = 1,
             interval = 0,
@@ -275,64 +160,49 @@ local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
             isBoss = true,
         })
 
-        -- 伴随怪从剩余活跃方向出现
-        local totalCompanion = math.floor(BaseMonsterCount() * 0.6)
-        local companionDirs = #activeIndices - 1
-        if companionDirs < 1 then companionDirs = 1; end -- 至少1个方向
-
-        -- 如果只有1个活跃方向，伴随怪也从同一方向出
-        if #activeIndices == 1 then
+        -- 伴随怪从所有路径出现
+        local totalCompanion = math.floor(BaseMonsterCount(globalWave) * 0.6)
+        local perPath = math.max(3, math.floor(totalCompanion / numPaths))
+        for pi = 1, numPaths do
             local eid = pool[math.random(1, #pool)]
-            table.insert(sectors, {
-                angle = bossAngle + math.rad(20),  -- 稍微偏一点
+            table.insert(groups, {
+                pathIdx = pi,
                 enemyId = eid,
-                count = totalCompanion,
-                interval = math.max(0.3, 1.5 - globalWave * 0.02),
-                delay = 3.0,
+                count = perPath,
+                interval = math.max(0.25, 1.2 - globalWave * 0.015),
+                delay = 3.0 + (pi - 1) * 1.5,
                 eliteAffixes = {},
                 isBoss = false,
             })
-        else
-            local perDir = math.max(3, math.floor(totalCompanion / companionDirs))
-            for ci = 2, #activeIndices do
-                local eid = pool[math.random(1, #pool)]
-                table.insert(sectors, {
-                    angle = bigWaveAngles_[activeIndices[ci]],
-                    enemyId = eid,
-                    count = perDir,
-                    interval = math.max(0.3, 1.5 - globalWave * 0.02),
-                    delay = 3.0 + (ci - 2) * 2.0,
-                    eliteAffixes = {},
-                    isBoss = false,
-                })
-            end
         end
     else
-        -- 普通波: 从活跃方向出怪
-        local activeIndices = PickActiveIndices(smallWave, bigWave)
-        prevActiveIndices_ = activeIndices
+        -- 普通波: 根据小波次决定使用几条路径
+        local activePaths = math.min(numPaths, math.max(1, math.ceil(smallWave / 3)))
+        -- 后期小波使用更多路径
+        if smallWave >= 5 then activePaths = numPaths end
 
-        local numSectors = #activeIndices
-        local totalMonsters = BaseMonsterCount()
+        local totalMonsters = BaseMonsterCount(globalWave)
         local remaining = totalMonsters
 
-        for si = 1, numSectors do
+        -- 选择路径 (循环分配)
+        for si = 1, activePaths do
+            local pathIdx = ((si - 1) % numPaths) + 1
             local eid = pool[math.random(1, #pool)]
             local count
-            if si == numSectors then
+            if si == activePaths then
                 count = math.max(1, remaining)
             else
-                count = math.max(2, math.floor(remaining / (numSectors - si + 1) + math.random(-2, 2)))
-                count = math.min(count, remaining - (numSectors - si))
+                count = math.max(2, math.floor(remaining / (activePaths - si + 1) + math.random(-2, 2)))
+                count = math.min(count, remaining - (activePaths - si))
             end
             remaining = remaining - count
 
-            -- 精英概率: 大波次3+ 开始，小波次越后越高
+            -- 精英概率
             local affixes = {}
             if #affixPool > 0 and smallWave >= 3 then
-                local eliteChance = 0.05 + (bigWave - 1) * 0.03 + (smallWave - 1) * 0.02
+                local eliteChance = 0.05 + (level - 1) * 0.03 + (smallWave - 1) * 0.02
                 if math.random() < eliteChance then
-                    local numAffixes = (bigWave >= 4 and math.random() < 0.3) and 2 or 1
+                    local numAffixes = (level >= 4 and math.random() < 0.3) and 2 or 1
                     local shuffled = {}
                     for _, a in ipairs(affixPool) do table.insert(shuffled, a) end
                     for j = #shuffled, 2, -1 do
@@ -345,229 +215,115 @@ local function GenerateSpawnSectors(bigWave, smallWave, globalWave)
                 end
             end
 
-            table.insert(sectors, {
-                angle = bigWaveAngles_[activeIndices[si]],
+            table.insert(groups, {
+                pathIdx = pathIdx,
                 enemyId = eid,
                 count = count,
-                interval = math.max(0.3, 1.5 - globalWave * 0.015),
-                delay = (si - 1) * 2.0,
+                interval = math.max(0.25, 1.2 - globalWave * 0.012),
+                delay = (si - 1) * 1.5,
                 eliteAffixes = affixes,
                 isBoss = false,
             })
         end
     end
 
-    return sectors
+    return groups
 end
 
 -- ============================================================================
--- 刷新指示器 (CustomGeometry 扇环 / Boss 三角警告)
+-- 刷新指示器 (简化: 路径起点方向箭头)
 -- ============================================================================
 
---- 创建一个扇环指示器 (多层渐变: 内圈紧贴范围圈, 从 FF0000 到透明)
---- 每层独立子节点 + 独立 PBR Alpha 材质, 实现真正的 alpha 渐变
---- @param angle number 中心角度 (弧度)
---- @param isBoss boolean 是否为 Boss 警告
---- @return Node 指示器父节点 (包含多个子层)
-local function CreateSectorIndicator(angle, isBoss)
-    local range = EnergyTower.GetEnergyRange()
-    local innerR = range + 0.5                           -- 与范围圈对齐 (Scene 中 +0.5)
-    local outerR = innerR + CONFIG.IndicatorArcWidth     -- 外圈向外延伸
-    local halfAngle = CONFIG.SectorAngleRad * 0.5
-    local arcSegments = 16    -- 圆弧细分
-    local radialLayers = 16   -- 径向分层 (越多过渡越平滑)
-    local y = CONFIG.GridY + 0.01
+local indicatorNodes_ = {}
+local indicatorTime_ = 0
 
-    -- 颜色参数
-    local baseR, baseG, baseB
-    if isBoss then
-        baseR, baseG, baseB = 1.0, 0.55, 0.0   -- Boss: 橙色
-    else
-        baseR, baseG, baseB = 1.0, 0.0, 0.0     -- 普通: 纯红 #FF0000
-    end
-    local innerAlpha = 0.65   -- 内圈不透明度
-    local outerAlpha = 0.0    -- 外圈完全透明
+--- 创建路径方向指示器 (路径起点处的脉冲三角)
+local function CreatePathIndicators()
+    ClearIndicators()
+    if not currentLevelData_ then return end
 
-    local parentNode = GS.scene:CreateChild("SectorIndicator")
-    parentNode.position = Vector3(0, y, 0)
-
-    -- 预加载 Technique
     local tech = cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml")
+    local y = 0.12  -- 高于路径地块(0.05)和地面
 
-    -- 收集本指示器的层数据 (材质引用 + 基础 alpha + 颜色)
-    local layersData = {}
+    for _, path in ipairs(currentLevelData_.paths) do
+        local wp1 = path.waypoints[1]
+        if wp1 then
+            -- 三角箭头指向路径行进方向
+            local wp2 = path.waypoints[2] or { x = 0, z = 0 }
+            local dx = wp2.x - wp1.x
+            local dz = wp2.z - wp1.z
+            local len = math.sqrt(dx * dx + dz * dz)
+            if len < 0.01 then dx, dz, len = 0, 1, 1 end
 
-    for layer = 0, radialLayers - 1 do
-        local t0 = layer / radialLayers
-        local t1 = (layer + 1) / radialLayers
-        local r0 = innerR + (outerR - innerR) * t0
-        local r1 = innerR + (outerR - innerR) * t1
-        -- 该层的 alpha = 内外两端 alpha 的中值
-        local tMid = (t0 + t1) * 0.5
-        local layerAlpha = innerAlpha + (outerAlpha - innerAlpha) * tMid
+            local node = GS.scene:CreateChild("PathIndicator")
+            node.position = Vector3(wp1.x, y, wp1.z)
 
-        -- 每层独立子节点
-        local layerNode = parentNode:CreateChild("Layer" .. layer)
-        local geom = layerNode:CreateComponent("CustomGeometry")
-        geom:BeginGeometry(0, TRIANGLE_LIST)
+            -- 朝路径方向
+            local yaw = math.deg(math.atan(dx, dz))
+            node.rotation = Quaternion(yaw, Vector3.UP)
 
-        for s = 0, arcSegments - 1 do
-            local a0 = angle - halfAngle + (s / arcSegments) * halfAngle * 2
-            local a1 = angle - halfAngle + ((s + 1) / arcSegments) * halfAngle * 2
-            local cos0, sin0 = math.cos(a0), math.sin(a0)
-            local cos1, sin1 = math.cos(a1), math.sin(a1)
+            -- 三角形几何 (大号箭头)
+            local geom = node:CreateComponent("CustomGeometry")
+            geom:BeginGeometry(0, TRIANGLE_LIST)
+            local s = 5.0  -- 箭头尺寸（加大）
+            -- 朝 +Z 方向的三角 (正面)
+            geom:DefineVertex(Vector3(0, 0, s)); geom:DefineNormal(Vector3.UP)
+            geom:DefineVertex(Vector3(-s * 0.6, 0, -s * 0.3)); geom:DefineNormal(Vector3.UP)
+            geom:DefineVertex(Vector3(s * 0.6, 0, -s * 0.3)); geom:DefineNormal(Vector3.UP)
+            -- 背面 (确保俯视角可见)
+            geom:DefineVertex(Vector3(0, 0, s)); geom:DefineNormal(Vector3(0, -1, 0))
+            geom:DefineVertex(Vector3(s * 0.6, 0, -s * 0.3)); geom:DefineNormal(Vector3(0, -1, 0))
+            geom:DefineVertex(Vector3(-s * 0.6, 0, -s * 0.3)); geom:DefineNormal(Vector3(0, -1, 0))
+            geom:Commit()
 
-            local il = Vector3(cos0 * r0, 0, sin0 * r0)
-            local ir = Vector3(cos1 * r0, 0, sin1 * r0)
-            local or_ = Vector3(cos1 * r1, 0, sin1 * r1)
-            local ol = Vector3(cos0 * r1, 0, sin0 * r1)
+            local mat = Material:new()
+            mat:SetTechnique(0, tech)
+            mat:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.2, 0.1, 0.7)))
+            mat:SetShaderParameter("MatEmissiveColor", Variant(Color(0.5, 0.05, 0.02)))
+            mat:SetShaderParameter("Metallic", Variant(0.0))
+            mat:SetShaderParameter("Roughness", Variant(1.0))
+            geom:SetMaterial(mat)
 
-            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
-            geom:DefineVertex(ir); geom:DefineNormal(Vector3.UP)
-            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
-
-            geom:DefineVertex(il); geom:DefineNormal(Vector3.UP)
-            geom:DefineVertex(or_); geom:DefineNormal(Vector3.UP)
-            geom:DefineVertex(ol); geom:DefineNormal(Vector3.UP)
+            table.insert(indicatorNodes_, { node = node, mat = mat })
         end
-
-        geom:Commit()
-
-        -- 独立材质 (PBR Alpha, 支持半透明)
-        local mat = Material:new()
-        mat:SetTechnique(0, tech)
-        mat:SetShaderParameter("MatDiffColor",
-            Variant(Color(baseR, baseG, baseB, layerAlpha)))
-        mat:SetShaderParameter("MatEmissiveColor",
-            Variant(Color(baseR * 0.4, baseG * 0.4, baseB * 0.4)))
-        mat:SetShaderParameter("Metallic", Variant(0.0))
-        mat:SetShaderParameter("Roughness", Variant(1.0))
-        geom:SetMaterial(mat)
-
-        -- 缓存材质引用和基础参数 (动画用)
-        table.insert(layersData, {
-            mat = mat,
-            baseAlpha = layerAlpha,
-            r = baseR, g = baseG, b = baseB,
-        })
     end
-
-    table.insert(indicatorLayers_, layersData)
-    return parentNode
 end
 
---- 创建 Boss 三角警告标记
---- @param angle number 中心角度 (弧度)
---- @return Node
-local function CreateBossWarning(angle)
-    local range = EnergyTower.GetEnergyRange()
-    local dist = range + CONFIG.IndicatorArcWidth + 0.8  -- 紧接扇环外侧
-    local cx = math.cos(angle) * dist
-    local cz = math.sin(angle) * dist
-    local y = CONFIG.GridY + 0.02
-    local s = CONFIG.BossWarnTriSize
-
-    local node = GS.scene:CreateChild("BossWarning")
-    node.position = Vector3(cx, y, cz)
-
-    local geom = node:CreateComponent("CustomGeometry")
-    geom:BeginGeometry(0, TRIANGLE_LIST)
-
-    -- 等边三角形 (顶部朝上)
-    local h = s * math.sqrt(3) * 0.5
-    local top = Vector3(0, h * 0.67, 0)
-    local bl = Vector3(-s * 0.5, -h * 0.33, 0)
-    local br = Vector3(s * 0.5, -h * 0.33, 0)
-    local warnColor = Color(1.0, 0.85, 0.10, 0.80)
-
-    -- 正面
-    geom:DefineVertex(top); geom:DefineNormal(Vector3.FORWARD); geom:DefineColor(warnColor)
-    geom:DefineVertex(bl);  geom:DefineNormal(Vector3.FORWARD); geom:DefineColor(warnColor)
-    geom:DefineVertex(br);  geom:DefineNormal(Vector3.FORWARD); geom:DefineColor(warnColor)
-    -- 背面
-    geom:DefineVertex(top); geom:DefineNormal(Vector3.BACK); geom:DefineColor(warnColor)
-    geom:DefineVertex(br);  geom:DefineNormal(Vector3.BACK); geom:DefineColor(warnColor)
-    geom:DefineVertex(bl);  geom:DefineNormal(Vector3.BACK); geom:DefineColor(warnColor)
-
-    geom:Commit()
-
-    -- 让三角形面向能源塔中心
-    local yaw = math.deg(math.atan(cx, cz)) + 180
-    node.rotation = Quaternion(yaw, Vector3.UP)
-
-    local mat = Material:new()
-    mat:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlitVCol.xml"))
-    geom:SetMaterial(mat)
-
-    return node
+--- 清除指示器
+function ClearIndicators()
+    for _, item in ipairs(indicatorNodes_) do
+        if item.node then item.node:Remove() end
+    end
+    indicatorNodes_ = {}
+    -- 兼容旧系统: 清除 GS 中的指示器
+    if GS.indicatorNodes then
+        for _, n in ipairs(GS.indicatorNodes) do
+            if n then n:Remove() end
+        end
+        GS.indicatorNodes = {}
+    end
+    if GS.bossWarnNodes then
+        for _, n in ipairs(GS.bossWarnNodes) do
+            if n then n:Remove() end
+        end
+        GS.bossWarnNodes = {}
+    end
 end
 
---- 清除所有指示器和警告节点
-local function ClearIndicators()
-    for _, n in ipairs(GS.indicatorNodes) do
-        if n then n:Remove() end
-    end
-    GS.indicatorNodes = {}
-    indicatorLayers_ = {}
-    for _, n in ipairs(GS.bossWarnNodes) do
-        if n then n:Remove() end
-    end
-    GS.bossWarnNodes = {}
-end
-
-
-
--- ============================================================================
--- 指示器动画
--- ============================================================================
-
-local indicatorTime_ = 0  -- 累计动画时间
-
---- 每个指示器的层数据 (创建时填充, 动画时直接使用)
---- indicatorLayers_[i] = { {mat=Material, baseAlpha=number, r=number, g=number, b=number}, ... }
-local indicatorLayers_ = {}
-
---- 更新指示器动画 (每帧调用)
---- preparing 阶段: 快速闪烁; 其他阶段: 缓慢呼吸脉冲
+--- 更新指示器动画
 local function UpdateIndicatorAnimation(dt)
     indicatorTime_ = indicatorTime_ + dt
-
     local isPreparing = (GS.wavePhase == "preparing")
-    -- alpha 乘数 (乘以每层基础 alpha)
     local mul
     if isPreparing then
-        -- 快速闪烁: 4Hz, 乘数在 0.3 ~ 1.0
-        mul = 0.65 + 0.35 * math.sin(indicatorTime_ * 8.0 * math.pi)
+        mul = 0.5 + 0.5 * math.sin(indicatorTime_ * 6.0 * math.pi)
     else
-        -- 缓慢呼吸: 0.5Hz, 乘数在 0.7 ~ 1.0
-        mul = 0.85 + 0.15 * math.sin(indicatorTime_ * 1.0 * math.pi)
+        mul = 0.7 + 0.3 * math.sin(indicatorTime_ * 1.5 * math.pi)
     end
 
-    -- 扇环指示器: 使用创建时缓存的材质引用和基础 alpha
-    for _, layers in ipairs(indicatorLayers_) do
-        for _, info in ipairs(layers) do
-            info.mat:SetShaderParameter("MatDiffColor",
-                Variant(Color(info.r, info.g, info.b, info.baseAlpha * mul)))
-        end
-    end
-
-    -- Boss 三角警告
-    local bossAlpha
-    if isPreparing then
-        bossAlpha = 0.4 + 0.6 * math.abs(math.sin(indicatorTime_ * 5.0 * math.pi))
-    else
-        bossAlpha = 0.6 + 0.4 * math.sin(indicatorTime_ * 1.5 * math.pi)
-    end
-    for _, n in ipairs(GS.bossWarnNodes) do
-        if n then
-            local geom = n:GetComponent("CustomGeometry")
-            if geom then
-                local mat = geom:GetMaterial()
-                if mat then
-                    mat:SetShaderParameter("MatDiffColor",
-                        Variant(Color(1, 1, 1, bossAlpha)))
-                end
-            end
+    for _, item in ipairs(indicatorNodes_) do
+        if item.mat then
+            item.mat:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.2, 0.1, 0.7 * mul)))
         end
     end
 end
@@ -576,25 +332,14 @@ end
 -- 波次运行时状态
 -- ============================================================================
 
--- 当前波次活跃的 spawn groups (运行时副本)
 local activeGroups_ = {}
-
--- 当前波次总怪物数 & 已刷数 (用于 UI 显示)
 local totalMonstersInWave_ = 0
 local spawnedMonstersInWave_ = 0
-
--- 当前波次准备时间 (缓存)
 local currentPrepTime_ = 0
 
 -- ============================================================================
 -- 核心逻辑
 -- ============================================================================
-
---- 获取刷新距离 (基于能源塔范围)
-local function GetSpawnDistance()
-    local range = EnergyTower.GetEnergyRange()
-    return range * CONFIG.SpawnDistanceFactor
-end
 
 --- 开始新一波
 function M.StartWave()
@@ -608,21 +353,25 @@ function M.StartWave()
     if GS.bigWave == 0 then GS.bigWave = 1 end
 
     GS.globalWave = (GS.bigWave - 1) * CONFIG.BigWaveSize + GS.smallWave
-    GS.currentWave = GS.globalWave -- 向后兼容
+    GS.currentWave = GS.globalWave
 
-    -- 新大波次: 重新生成3个固定出怪方向
-    local isNewBigWave = (GS.bigWave ~= prevBigWave or GS.globalWave == 1)
-    if isNewBigWave then
-        GenerateBigWaveAngles()
-        print(string.format("[Wave] BigWave %d: New spawn angles: %.0f° %.0f° %.0f°",
-            GS.bigWave,
-            math.deg(bigWaveAngles_[1]),
-            math.deg(bigWaveAngles_[2]),
-            math.deg(bigWaveAngles_[3])
-        ))
-        -- 通知 Scene 重建弧段节点
+    -- 新关卡: 加载路径数据
+    local isNewLevel = (GS.bigWave ~= prevBigWave or GS.globalWave == 1)
+    if isNewLevel then
+        LoadLevelData(GS.bigWave)
+
+        -- 通知 Scene 渲染路径
         local Scene = require("Scene")
-        Scene.RebuildSpawnArcs(bigWaveAngles_)
+        if Scene.RenderLevelPaths then
+            Scene.RenderLevelPaths(currentLevelData_)
+        end
+
+        -- 全屏公告: 新关卡
+        GameUI.ShowAnnouncement(
+            string.format("关卡 %d", GS.bigWave),
+            currentLevelData_.name,
+            { 255, 200, 50, 255 }  -- 金色
+        )
     end
 
     -- 准备时间
@@ -631,42 +380,34 @@ function M.StartWave()
         currentPrepTime_ = CONFIG.PrepTimeFirst
     elseif isBossWave then
         currentPrepTime_ = CONFIG.PrepTimeBoss
+    elseif isNewLevel then
+        currentPrepTime_ = CONFIG.PrepTimeFirst  -- 新关卡首波给更多准备时间
     else
         currentPrepTime_ = CONFIG.PrepTimeBase
     end
 
     GS.wavePhase = "preparing"
     GS.waveTimer = currentPrepTime_
-    indicatorTime_ = 0  -- 重置动画计时
+    indicatorTime_ = 0
 
-    -- 生成刷新扇区 (同时更新 prevActiveIndices_)
-    GS.spawnSectors = GenerateSpawnSectors(GS.bigWave, GS.smallWave, GS.globalWave)
+    -- 生成刷新配置
+    GS.spawnSectors = GenerateSpawnGroups(GS.bigWave, GS.smallWave, GS.globalWave)
 
-    -- 通知 Scene 更新活跃弧段高亮 (本小波活跃方向标红)
-    do
-        local Scene = require("Scene")
-        Scene.UpdateSpawnArcActive(M.GetActiveSpawnAngles())
-    end
-
-    -- 构建活跃 spawn groups (从扇区生成)
+    -- 构建活跃 spawn groups
     activeGroups_ = {}
     totalMonstersInWave_ = 0
     spawnedMonstersInWave_ = 0
 
-    local spawnDist = GetSpawnDistance()
-
     for _, sector in ipairs(GS.spawnSectors) do
         totalMonstersInWave_ = totalMonstersInWave_ + sector.count
         table.insert(activeGroups_, {
+            pathIdx = sector.pathIdx,
             enemy_id = sector.enemyId,
             count = sector.count,
             interval = sector.interval,
             delay = sector.delay,
             elite_affixes = sector.eliteAffixes or {},
             isBoss = sector.isBoss or false,
-            -- 刷新位置信息
-            sectorAngle = sector.angle,
-            spawnDist = spawnDist,
             -- 运行时
             spawned = 0,
             timer = 0,
@@ -674,31 +415,13 @@ function M.StartWave()
         })
     end
 
-    -- 清除旧指示器, 创建新指示器
-    ClearIndicators()
-    for _, sector in ipairs(GS.spawnSectors) do
-        local indNode = CreateSectorIndicator(sector.angle, sector.isBoss)
-        table.insert(GS.indicatorNodes, indNode)
-
-        -- 如果是 Boss 扇区, 额外创建三角警告
-        if sector.isBoss then
-            local warnNode = CreateBossWarning(sector.angle)
-            table.insert(GS.bossWarnNodes, warnNode)
-        end
-    end
-
-    -- 检查下一小波是否有 Boss (提前预警)
-    local nextSmall = GS.smallWave + 1
-    if nextSmall <= CONFIG.BigWaveSize then
-        if nextSmall == CONFIG.MiniBossSubWave or nextSmall == CONFIG.BigBossSubWave then
-            -- 预告: 下波有 Boss, 暂不创建警告 (等下波 preparing 时再创建)
-        end
-    end
+    -- 创建指示器
+    CreatePathIndicators()
 
     local waveName = M.GetWaveName()
-    print(string.format("[Wave] Preparing Big%d-Small%d (Global %d) \"%s\" (%d monsters, %d sectors, %.0fs prep)",
+    print(string.format("[Wave] Preparing Level%d-Wave%d (Global %d) \"%s\" (%d monsters, %.0fs prep)",
         GS.bigWave, GS.smallWave, GS.globalWave, waveName,
-        totalMonstersInWave_, #GS.spawnSectors, currentPrepTime_))
+        totalMonstersInWave_, currentPrepTime_))
 end
 
 --- 跳过准备阶段
@@ -719,12 +442,8 @@ function M.Update(dt)
         return
     end
 
-    -- 指示器动画 (所有阶段都执行)
+    -- 指示器动画
     UpdateIndicatorAnimation(dt)
-
-    -- 出怪弧段动画 (所有阶段都执行)
-    local Scene = require("Scene")
-    Scene.UpdateSpawnArcs(dt)
 
     -- === 准备阶段 ===
     if GS.wavePhase == "preparing" then
@@ -736,16 +455,15 @@ function M.Update(dt)
 
         if GS.waveTimer <= 0 then
             GS.wavePhase = "spawning"
-            print(string.format("[Wave] Big%d-Small%d (Global %d) started!",
+            print(string.format("[Wave] Level%d-Wave%d (Global %d) started!",
                 GS.bigWave, GS.smallWave, GS.globalWave))
 
-            -- 全屏公告: 敌袭来临
-            local waveLabel = string.format("%d.%d", GS.bigWave, GS.smallWave)
+            local waveLabel = string.format("%d-%d", GS.bigWave, GS.smallWave)
             local waveName = M.GetWaveName()
             GameUI.ShowAnnouncement(
                 "敌袭来临",
                 string.format("Wave %s「%s」", waveLabel, waveName),
-                nil  -- 默认红色
+                nil
             )
         end
         return
@@ -771,18 +489,20 @@ function M.Update(dt)
                         g.spawned = g.spawned + 1
                         spawnedMonstersInWave_ = spawnedMonstersInWave_ + 1
 
-                        -- 计算扇区内随机偏移位置
-                        local angleOffset = (math.random() - 0.5) * CONFIG.SectorAngleRad * 0.8
-                        local spawnAngle = g.sectorAngle + angleOffset
-                        local distJitter = g.spawnDist + (math.random() - 0.5) * 2.0
-                        local sx = math.cos(spawnAngle) * distJitter
-                        local sz = math.sin(spawnAngle) * distJitter
+                        -- 路径起点刷怪
+                        local path = currentLevelData_.paths[g.pathIdx]
+                        if not path then path = currentLevelData_.paths[1] end
+
+                        local sx, sz = RandomSpawnOnPath(path)
+                        local pathData = BuildPathData(path)
 
                         Monster.SpawnMonster(g.enemy_id, {
                             spawnX = sx,
                             spawnZ = sz,
                             waveNumber = GS.globalWave,
                             eliteAffixes = g.elite_affixes,
+                            pathData = pathData,
+                            pathWidth = path.width,
                         })
 
                         if g.spawned < g.count then
@@ -806,12 +526,11 @@ function M.Update(dt)
     -- === 清场阶段 ===
     if GS.wavePhase == "clearing" then
         if #GS.monsters == 0 then
-            -- 全屏公告: 波次完成
-            local waveLabel = string.format("%d.%d", GS.bigWave, GS.smallWave)
+            local waveLabel = string.format("%d-%d", GS.bigWave, GS.smallWave)
             GameUI.ShowAnnouncement(
                 "波次完成",
                 string.format("Wave %s 已清除", waveLabel),
-                { 80, 240, 120, 255 }  -- 绿色
+                { 80, 240, 120, 255 }
             )
 
             -- 波次完成奖励
@@ -822,7 +541,18 @@ function M.Update(dt)
             print(string.format("[Wave] Global %d cleared! Bonus: +%d gold, +%d material",
                 GS.globalWave, bonusGold, bonusMat))
 
-            -- 触发圣器掉落 (每小波结束都有)
+            -- 检查关卡是否完成 (8波一关)
+            if GS.smallWave >= CONFIG.BigWaveSize then
+                -- 关卡通关!
+                GameUI.ShowAnnouncement(
+                    string.format("关卡 %d 通关!", GS.bigWave),
+                    string.format("「%s」已征服", currentLevelData_.name),
+                    { 255, 215, 0, 255 }  -- 金色
+                )
+                print(string.format("[Wave] ★ Level %d CLEAR! ★", GS.bigWave))
+            end
+
+            -- 触发圣器掉落
             Artifact.TriggerWaveDrop()
             if GS.artifactDropPending then
                 GS.wavePhase = "dropping"
@@ -844,7 +574,7 @@ function M.Update(dt)
         return
     end
 
-    -- === 等待阶段：无限期暂停，玩家按空格继续 ===
+    -- === 等待阶段 ===
     if GS.wavePhase == "waiting" then
         if input:GetKeyPress(KEY_SPACE) then
             M.StartWave()
@@ -857,7 +587,6 @@ end
 -- UI 信息
 -- ============================================================================
 
---- 获取当前波次名称 (程序化生成)
 function M.GetWaveName()
     local bw = GS.bigWave
     local sw = GS.smallWave
@@ -867,8 +596,6 @@ function M.GetWaveName()
         return "大Boss: 吞线母体"
     end
 
-    -- 普通波: 基于内容生成简短名称
-    local pool = GetPool(bw)
     if bw <= 1 then return "先锋进攻"
     elseif bw <= 2 then return "多路夹击"
     elseif bw <= 3 then return "精英混战"
@@ -877,7 +604,6 @@ function M.GetWaveName()
     end
 end
 
---- 获取下一波预告
 function M.GetNextWavePreview()
     local nextSmall = GS.smallWave + 1
     local nextBig = GS.bigWave
@@ -899,35 +625,50 @@ function M.GetNextWavePreview()
         smallWave = nextSmall,
         name = isBoss and ("Boss: " .. bossName) or "普通波",
         isBoss = isBoss,
-        summary = isBoss and bossName or string.format("~%d 怪物", math.floor(5 + nextGlobal * 1.5)),
-        totalMonsters = 0, -- 程序化生成，具体数未知
+        summary = isBoss and bossName or string.format("~%d 怪物", math.floor(8 + nextGlobal * 2.0)),
+        totalMonsters = 0,
     }
 end
 
---- 获取波次显示信息
 function M.GetWaveInfo()
     local phase = GS.wavePhase
     local bw = GS.bigWave
     local sw = GS.smallWave
-    local gw = GS.globalWave
 
-    local waveLabel = string.format("%d.%d", bw, sw)
+    local waveLabel = string.format("Lv%d W%d", bw, sw)
 
     if phase == "preparing" then
         local waveName = M.GetWaveName()
-        return string.format("Wave %s「%s」| %.0f秒 (空格跳过)",
+        return string.format("%s「%s」| %.0f秒 (空格跳过)",
             waveLabel, waveName, math.max(0, GS.waveTimer))
     elseif phase == "spawning" then
-        return string.format("Wave %s | 出怪中 %d/%d",
+        return string.format("%s | 出怪中 %d/%d",
             waveLabel, spawnedMonstersInWave_, totalMonstersInWave_)
     elseif phase == "clearing" then
-        return string.format("Wave %s | 清剿中 (剩余 %d)",
+        return string.format("%s | 清剿中 (剩余 %d)",
             waveLabel, #GS.monsters)
     elseif phase == "waiting" then
-        return string.format("Wave %s 已完成 | 按空格开始下一波", waveLabel)
+        return string.format("%s 已完成 | 按空格开始下一波", waveLabel)
     else
-        return string.format("Wave %s", waveLabel)
+        return string.format("%s", waveLabel)
     end
+end
+
+--- 兼容旧接口: 获取出怪方向 (路径起点方向)
+function M.GetBigWaveAngles()
+    if not currentLevelData_ then return {} end
+    local angles = {}
+    for _, path in ipairs(currentLevelData_.paths) do
+        local wp = path.waypoints[1]
+        if wp then
+            table.insert(angles, math.atan(wp.z, wp.x))
+        end
+    end
+    return angles
+end
+
+function M.GetActiveSpawnAngles()
+    return M.GetBigWaveAngles()
 end
 
 return M
